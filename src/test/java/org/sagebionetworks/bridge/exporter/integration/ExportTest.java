@@ -29,7 +29,6 @@ import org.joda.time.DateTimeZone;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
-import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
@@ -42,6 +41,8 @@ import org.sagebionetworks.repo.model.Team;
 import org.sagebionetworks.repo.model.table.QueryResultBundle;
 import org.sagebionetworks.repo.model.table.Row;
 import org.sagebionetworks.repo.model.table.TableEntity;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.junit4.SpringJUnit4ClassRunner;
@@ -85,6 +86,7 @@ import org.sagebionetworks.bridge.sqs.SqsHelper;
 @RunWith(SpringJUnit4ClassRunner.class)
 @Category(IntegrationSmokeTest.class)
 public class ExportTest {
+    private static final Logger LOG = LoggerFactory.getLogger(ExportTest.class);
     private static final String zipFile = "./legacy-survey.zip";
     private static final String outputFileName = "./legacy-survey-encrypted";
 
@@ -358,7 +360,7 @@ public class ExportTest {
     public void testInstant() throws Exception {
         DateTime dateTimeBeforeExport = DateTime.now();
         Long epochBeforeExport = dateTimeBeforeExport.getMillis(); // use for later verification
-        System.out.println("Time before request instant exporting: " + dateTimeBeforeExport.toString());
+        LOG.info("Time before request instant exporting: " + dateTimeBeforeExport.toString());
 
         TimeUnit.MINUTES.sleep(1); // wait for gray period
 
@@ -513,7 +515,6 @@ public class ExportTest {
     }
 
     @Test
-    @Ignore
     public void testS3Override() throws Exception {
         UploadValidationStatus
                 uploadStatus = user.getClient(ForConsentedUsersApi.class).getUploadStatus(uploadId).execute().body();
@@ -524,7 +525,7 @@ public class ExportTest {
         s3Helper.writeLinesToS3(recordIdOverrideBucket, s3FileName, recordIds);
 
         DateTime dateTimeBeforeExport = DateTime.now();
-        System.out.println("Time before request daily exporting: " + dateTimeBeforeExport.toString());
+        LOG.info("Time before request daily exporting: " + dateTimeBeforeExport.toString());
 
         // then upload another test file
         createAndEncryptTestFiles(TEST_FILES_A_2, TEST_FILES_B_2);
@@ -693,7 +694,7 @@ public class ExportTest {
             exporterRequest = exporterRequestOri;
         }
 
-        System.out.println("Time before request daily exporting: " + exporterRequest.getEndDateTime().toString());
+        LOG.info("Time before request daily exporting: " + exporterRequest.getEndDateTime().toString());
 
         sqsHelper.sendMessageAsJson(EXPORTER_SQS_URL, exporterRequest, 5);
 

@@ -100,7 +100,6 @@ public class BridgeExporterTestSpringConfig {
 
     @Bean(name = "ddbSynapseMetaTables")
     public Table ddbSynapseMetaTables() {
-        System.out.println("========= ddb table: " + ddbPrefix() + "SynapseMetaTables");
         return ddbClient().getTable(ddbPrefix() + "SynapseMetaTables");
     }
 
