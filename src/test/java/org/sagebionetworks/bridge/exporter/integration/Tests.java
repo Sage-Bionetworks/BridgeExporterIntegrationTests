@@ -184,7 +184,7 @@ public class Tests {
         Study study = new Study();
         study.setIdentifier(identifier);
         study.setMinAgeOfConsent(18);
-        study.setName("Test Study [SDK]");
+        study.setName("Test Study [Exporter Integ Test]" + randomIdentifier(Tests.class));
         study.setSponsorName("The Test Study Folks [SDK]");
         study.setSupportEmail("test@test.com");
         study.setConsentNotificationEmail("test2@test.com");
@@ -197,6 +197,7 @@ public class Tests {
         study.setVerifyEmailTemplate(Tests.TEST_VERIFY_EMAIL_TEMPLATE);
         study.setHealthCodeExportEnabled(Boolean.TRUE);
         study.setDisableExport(true);
+        study.setUsesCustomExportSchedule(false);
         
         Map<String,Integer> map = new HashMap<>();
         map.put("Android", 10);

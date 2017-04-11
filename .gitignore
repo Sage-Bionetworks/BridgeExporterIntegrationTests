@@ -38,4 +38,5 @@ release.properties
 dependency-reduced-pom.xml
 buildNumber.properties
 .mvn/timing.properties
-
+legacy-survey.zip
+legacy-survey-encrypted
