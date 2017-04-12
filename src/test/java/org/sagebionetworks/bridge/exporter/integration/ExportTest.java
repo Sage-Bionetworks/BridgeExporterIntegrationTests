@@ -300,7 +300,6 @@ public class ExportTest {
 
         // then create test synapse project and team
         createSynapseProjectAndTeam();
-
     }
 
     @After
@@ -505,7 +504,7 @@ public class ExportTest {
 
         sqsHelper.sendMessageAsJson(EXPORTER_SQS_URL, exporterRequest, 5);
 
-        TimeUnit.MINUTES.sleep(1);
+        TimeUnit.SECONDS.sleep(30);
 
         Item lastExportDateTime = ddbExportTimeTable.getItem("studyId", studyId);
         Long lastExportDateTimeEpoch = lastExportDateTime.getLong("lastExportDateTime");
@@ -577,8 +576,18 @@ public class ExportTest {
             // app version
             String jobIdTokenAppVersion = synapseClient.queryTableEntityBundleAsyncStart("select * from " + appVersionTableId, 0L, 100L, true, 0xF, appVersionTableId);
 
-            // also need to wait for query synapse table
-            TimeUnit.SECONDS.sleep(30);
+            TimeUnit.SECONDS.sleep(2);
+
+            // study status
+            String jobIdTokenStudyStatus = synapseClient.queryTableEntityBundleAsyncStart("select * from " + statusTableId, 0L, 100L, true, 0xF, statusTableId);
+
+            TimeUnit.SECONDS.sleep(2);
+
+            // survey table
+            String jobIdTokenSurvey = synapseClient.queryTableEntityBundleAsyncStart("select * from " + schemaKeyTableId, 0L, 100L, true, 0xF, schemaKeyTableId);
+
+            // wait for query synapse table
+            TimeUnit.SECONDS.sleep(2);
 
             QueryResultBundle queryResultAppVersion = synapseClient.queryTableEntityBundleAsyncGet(jobIdTokenAppVersion, appVersionTableId);
             List<Row> tableContents = queryResultAppVersion.getQueryResult().getQueryResults().getRows();
@@ -592,12 +601,6 @@ public class ExportTest {
 
             assertEquals(appVersionRowStr, tableContents.get(offset).getValues().toString());
 
-            // study status
-            String jobIdTokenStudyStatus = synapseClient.queryTableEntityBundleAsyncStart("select * from " + statusTableId, 0L, 100L, true, 0xF, statusTableId);
-
-            // also need to wait for query synapse table
-            TimeUnit.SECONDS.sleep(30);
-
             QueryResultBundle queryResultStudyStatus = synapseClient.queryTableEntityBundleAsyncGet(jobIdTokenStudyStatus, statusTableId);
             List<Row> studyStatusTableContents = queryResultStudyStatus.getQueryResult().getQueryResults().getRows();
 
@@ -607,12 +610,6 @@ public class ExportTest {
             String studyStatusRowStr = "[" + uploadStatus.getRecord().getUploadDate().toString() + "]";
 
             assertEquals(studyStatusRowStr, studyStatusTableContents.get(offset).getValues().toString());
-
-            // survey table
-            String jobIdTokenSurvey = synapseClient.queryTableEntityBundleAsyncStart("select * from " + schemaKeyTableId, 0L, 100L, true, 0xF, schemaKeyTableId);
-
-            // also need to wait for query synapse table
-            TimeUnit.SECONDS.sleep(30);
 
             QueryResultBundle queryResultSurvey = synapseClient.queryTableEntityBundleAsyncGet(jobIdTokenSurvey, schemaKeyTableId);
             List<Row> surveyTableContents = queryResultSurvey.getQueryResult().getQueryResults().getRows();
@@ -698,7 +695,11 @@ public class ExportTest {
 
         sqsHelper.sendMessageAsJson(EXPORTER_SQS_URL, exporterRequest, 5);
 
-        TimeUnit.MINUTES.sleep(1);
+        if (exportAll) {
+            TimeUnit.MINUTES.sleep(1);
+        } else {
+            TimeUnit.SECONDS.sleep(25);
+        }
 
         // verification
         verifyExport(uploadId, offset, noUpload);

@@ -2,4 +2,4 @@
 Integration test for Bridge Exporter
 
 ## Note
-This Integ test will take nearly 60 mins to complete. 
+This Integ test will take about 20 mins to complete. 
