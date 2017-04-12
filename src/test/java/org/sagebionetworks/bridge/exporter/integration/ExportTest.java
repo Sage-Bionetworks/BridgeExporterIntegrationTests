@@ -576,18 +576,18 @@ public class ExportTest {
             // app version
             String jobIdTokenAppVersion = synapseClient.queryTableEntityBundleAsyncStart("select * from " + appVersionTableId, 0L, 100L, true, 0xF, appVersionTableId);
 
-            TimeUnit.SECONDS.sleep(2);
+            TimeUnit.SECONDS.sleep(3);
 
             // study status
             String jobIdTokenStudyStatus = synapseClient.queryTableEntityBundleAsyncStart("select * from " + statusTableId, 0L, 100L, true, 0xF, statusTableId);
 
-            TimeUnit.SECONDS.sleep(2);
+            TimeUnit.SECONDS.sleep(3);
 
             // survey table
             String jobIdTokenSurvey = synapseClient.queryTableEntityBundleAsyncStart("select * from " + schemaKeyTableId, 0L, 100L, true, 0xF, schemaKeyTableId);
 
             // wait for query synapse table
-            TimeUnit.SECONDS.sleep(2);
+            TimeUnit.SECONDS.sleep(3);
 
             QueryResultBundle queryResultAppVersion = synapseClient.queryTableEntityBundleAsyncGet(jobIdTokenAppVersion, appVersionTableId);
             List<Row> tableContents = queryResultAppVersion.getQueryResult().getQueryResults().getRows();
@@ -640,14 +640,14 @@ public class ExportTest {
                 assertNotNull(lastExportDateTimeEpoch);
 
                 // the time recorded in export time table should be equal to the date time we submit to the export request
-                assertEquals(lastExportDateTimeEpoch, endDateTimeEpoch);
+                assertEquals(endDateTimeEpoch, lastExportDateTimeEpoch);
             } else {
                 Iterable<Item> scanOutcomes = ddbScanHelper.scan(ddbExportTimeTable);
 
                 // verify if all studies' last export date time are modified
                 for (Item item: scanOutcomes) {
                     long lastExportDateTimeEpoch = item.getLong("lastExportDateTime");
-                    assertEquals(lastExportDateTimeEpoch, endDateTimeEpoch);
+                    assertEquals(endDateTimeEpoch, lastExportDateTimeEpoch);
                 }
             }
         } else {
@@ -696,9 +696,9 @@ public class ExportTest {
         sqsHelper.sendMessageAsJson(EXPORTER_SQS_URL, exporterRequest, 5);
 
         if (exportAll) {
-            TimeUnit.MINUTES.sleep(1);
+            TimeUnit.SECONDS.sleep(80);
         } else {
-            TimeUnit.SECONDS.sleep(25);
+            TimeUnit.SECONDS.sleep(30);
         }
 
         // verification
