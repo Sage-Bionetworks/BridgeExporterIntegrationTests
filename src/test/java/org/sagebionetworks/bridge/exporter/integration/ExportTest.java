@@ -32,13 +32,13 @@ import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 import org.junit.After;
 import org.junit.Before;
-import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
 import org.sagebionetworks.client.SynapseAdminClientImpl;
 import org.sagebionetworks.client.SynapseClient;
 import org.sagebionetworks.client.exceptions.SynapseException;
+import org.sagebionetworks.client.exceptions.SynapseResultNotReadyException;
 import org.sagebionetworks.repo.model.Entity;
 import org.sagebionetworks.repo.model.Project;
 import org.sagebionetworks.repo.model.Team;
@@ -150,9 +150,14 @@ public class ExportTest {
 
 
     private static final int UPLOAD_STATUS_DELAY_MILLISECONDS = 5000;
+    private static final int EXPORT_SINGLE_SECONDS = 10;
+    private static final int EXPORT_ALL_SECONDS = 20;
+    private static final int SYNAPSE_SECONDS = 3;
 
     // Retry up to 6 times, so we don't spend more than 30 seconds per test.
     private static final int UPLOAD_STATUS_DELAY_RETRIES = 6;
+    private static final int EXPORT_RETRIES = 5;
+    private static final int SYNAPSE_RETRIES = 5;
 
     private static final String USER_NAME = "synapse.user";
     private static final String SYNAPSE_API_KEY_NAME = "synapse.api.key";
@@ -344,7 +349,7 @@ public class ExportTest {
     }
 
     @Test
-    @Ignore
+    //@Ignore
     public void testInstant() throws Exception {
         DateTime dateTimeBeforeExport = DateTime.now();
         Long epochBeforeExport = dateTimeBeforeExport.minusMinutes(3).getMillis(); // use for later verification
@@ -363,10 +368,10 @@ public class ExportTest {
         assertEquals(202, response.code());
 
         // sleep a while to wait for exporter
-        TimeUnit.SECONDS.sleep(30);
+        //TimeUnit.SECONDS.sleep(10);
 
         // verify
-        verifyExport(uploadId, 0, false);
+        verifyExport(uploadId, 0, false, false);
 
         Item lastExportDateTime = ddbExportTimeTable.getItem("studyId", studyId);
         Long lastExportDateTimeEpoch = lastExportDateTime.getLong("lastExportDateTime");
@@ -398,7 +403,7 @@ public class ExportTest {
         TimeUnit.SECONDS.sleep(30);
 
         // verify
-        verifyExport(uploadId2, 1, false);
+        verifyExport(uploadId2, 1, false, false);
 
         lastExportDateTime = ddbExportTimeTable.getItem("studyId", studyId);
         lastExportDateTimeEpoch = lastExportDateTime.getLong("lastExportDateTime");
@@ -449,7 +454,7 @@ public class ExportTest {
     }
 
     @Test
-    @Ignore
+    //@Ignore
     public void testDailyAllStudies() throws Exception {
         assertExport(null, ExportType.DAILY, uploadId, 0, true, false, false);
 
@@ -462,7 +467,7 @@ public class ExportTest {
     }
 
     @Test
-    @Ignore
+    //@Ignore
     public void testHourlyOnlyTestStudy() throws Exception {
         // modify uploadedOn field in record table to a fake datetime earlier than 1 hour ago
         UploadValidationStatus
@@ -497,20 +502,7 @@ public class ExportTest {
     }
 
     @Test
-    @Ignore
-    public void testHourlyAllStudies() throws Exception {
-        assertExport(null, ExportType.HOURLY, uploadId, 0, true, false, false);
-
-        // then export another upload
-        createAndEncryptTestFiles(TEST_FILES_A_2, TEST_FILES_B_2);
-        String uploadId2 = testUpload("./legacy-survey-encrypted"); // using the same file name
-
-        // check again
-        assertExport(null, ExportType.HOURLY, uploadId2, 1, true, false, false);
-    }
-
-    @Test
-    @Ignore
+    //@Ignore
     public void testDailyIgnoreLastExportDateTime() throws Exception {
         // first modify uploadedOn value for test upload
         UploadValidationStatus uploadStatus = user.getClient(ForConsentedUsersApi.class).getUploadStatus(uploadId).execute().body();
@@ -527,7 +519,7 @@ public class ExportTest {
     }
 
     @Test
-    @Ignore
+    //@Ignore
     public void testHourlyIgnoreLastExportDateTime() throws Exception {
         UploadValidationStatus uploadStatus = user.getClient(ForConsentedUsersApi.class).getUploadStatus(uploadId).execute().body();
         ddbRecordTable.updateItem("id", uploadStatus.getRecord().getId(),
@@ -543,7 +535,7 @@ public class ExportTest {
     }
 
     @Test
-    @Ignore
+    //@Ignore
     public void testEndDateTimeBeforeLastExportDateTime() throws Exception {
         DateTime dateTimeBeforeExport = DateTime.now();
         ObjectNode exporterRequest = JSON_OBJECT_MAPPER.createObjectNode();
@@ -579,7 +571,7 @@ public class ExportTest {
     }
 
     @Test
-    @Ignore
+    //@Ignore
     public void testS3Override() throws Exception {
         UploadValidationStatus
                 uploadStatus = user.getClient(ForConsentedUsersApi.class).getUploadStatus(uploadId).execute().body();
@@ -634,14 +626,8 @@ public class ExportTest {
 
         sqsHelper.sendMessageAsJson(exporterSqsUrl, exporterRequest, 0);
 
-        if (exportAll) {
-            TimeUnit.SECONDS.sleep(80);
-        } else {
-            TimeUnit.SECONDS.sleep(30);
-        }
-
         // verification
-        verifyExport(uploadId, offset, noUpload);
+        verifyExport(uploadId, offset, noUpload, exportAll);
         if (exporterRequest.get("recordIdS3Override") != null) {
             Item lastExportDateTime = ddbExportTimeTable.getItem("studyId", studyId);
             assertNull(lastExportDateTime);
@@ -650,12 +636,35 @@ public class ExportTest {
         }
     }
 
-    private void verifyExport(String uploadId, int offset, boolean noUpload) throws SynapseException, InterruptedException, IOException {
-        UploadValidationStatus
-                uploadStatus = user.getClient(ForConsentedUsersApi.class).getUploadStatus(uploadId).execute().body();
+    private void verifyExport(String uploadId, int offset, boolean noUpload, boolean exportAll) throws SynapseException, InterruptedException, IOException {
+        ForConsentedUsersApi forConsentedUsersApi = user.getClient(ForConsentedUsersApi.class);
+        UploadValidationStatus uploadStatus = null;
         if (!noUpload) {
+            if (exportAll) {
+                for (int i = 0; i < EXPORT_RETRIES; i++) {
+                    LOG.info("Retry get export status times: " + i);
+                    TimeUnit.SECONDS.sleep(EXPORT_ALL_SECONDS);
+
+                    uploadStatus = forConsentedUsersApi.getUploadStatus(uploadId).execute().body();
+                    if (uploadStatus.getRecord().getSynapseExporterStatus() == SynapseExporterStatus.SUCCEEDED) {
+                        break;
+                    }
+                }
+            } else {
+                for (int i = 0; i < EXPORT_RETRIES; i++) {
+                    LOG.info("Retry get export status times: " + i);
+                    TimeUnit.SECONDS.sleep(EXPORT_SINGLE_SECONDS);
+
+                    uploadStatus = forConsentedUsersApi.getUploadStatus(uploadId).execute().body();
+                    if (uploadStatus.getRecord().getSynapseExporterStatus() == SynapseExporterStatus.SUCCEEDED) {
+                        break;
+                    }
+                }
+            }
+
             assertEquals(SynapseExporterStatus.SUCCEEDED, uploadStatus.getRecord().getSynapseExporterStatus());
         } else {
+            uploadStatus = forConsentedUsersApi.getUploadStatus(uploadId).execute().body();
             assertNull(uploadStatus.getRecord().getSynapseExporterStatus());
         }
 
@@ -674,6 +683,34 @@ public class ExportTest {
             assertTrue(StringUtils.isBlank(schemaKeyTableId));
 
         } else {
+            // still need to wait ddb to update synapse tables
+            for (int i = 0; i < SYNAPSE_RETRIES; i++) {
+                if (!StringUtils.isBlank(appVersionTableId)) {
+                    break;
+                }
+                TimeUnit.SECONDS.sleep(6);
+                appVersionItem = ddbSynapseMetaTables.getItem("tableName", studyId + "-appVersion");
+                appVersionTableId = appVersionItem.getString("tableId");
+            }
+
+            for (int i = 0; i < SYNAPSE_RETRIES; i++) {
+                if (!StringUtils.isBlank(statusTableId)) {
+                    break;
+                }
+                TimeUnit.SECONDS.sleep(6);
+                statusItem = ddbSynapseMetaTables.getItem("tableName", studyId + "-status");
+                statusTableId = statusItem.getString("tableId");
+            }
+
+            for (int i = 0; i < SYNAPSE_RETRIES; i++) {
+                if (!StringUtils.isBlank(schemaKeyTableId)) {
+                    break;
+                }
+                TimeUnit.SECONDS.sleep(6);
+                schemaKeyItem = ddbSynapseTables.getItem("schemaKey", studyId + "-legacy-survey-v1");
+                schemaKeyTableId = schemaKeyItem.getString("tableId");
+            }
+
             assertFalse(StringUtils.isBlank(appVersionTableId));
             assertFalse(StringUtils.isBlank(statusTableId));
             assertFalse(StringUtils.isBlank(schemaKeyTableId));
@@ -695,10 +732,22 @@ public class ExportTest {
             // survey table
             String jobIdTokenSurvey = synapseClient.queryTableEntityBundleAsyncStart("select * from " + schemaKeyTableId, 0L, 100L, true, 0xF, schemaKeyTableId);
 
-            // wait for query synapse table
-            TimeUnit.SECONDS.sleep(3);
+            QueryResultBundle queryResultAppVersion = null;
+            for (int i = 0; i < SYNAPSE_RETRIES; i++) {
+                try {
+                    LOG.info("Retry get synapse app version table query result times: " + i);
+                    TimeUnit.SECONDS.sleep(SYNAPSE_SECONDS);
+                    queryResultAppVersion = synapseClient.queryTableEntityBundleAsyncGet(jobIdTokenAppVersion, appVersionTableId);
+                    break;
+                } catch (SynapseResultNotReadyException e) {
+                    // do nothing
+                }
+            }
 
-            QueryResultBundle queryResultAppVersion = synapseClient.queryTableEntityBundleAsyncGet(jobIdTokenAppVersion, appVersionTableId);
+            if (queryResultAppVersion == null) {
+                fail("Query app version table failed.");
+            }
+
             List<SelectColumn> tableHeaders = queryResultAppVersion.getQueryResult().getQueryResults().getHeaders();
             List<Row> tableContents = queryResultAppVersion.getQueryResult().getQueryResults().getRows();
             List<String> rowContent = tableContents.get(offset).getValues();
@@ -763,7 +812,22 @@ public class ExportTest {
                 }
             }
 
-            QueryResultBundle queryResultStudyStatus = synapseClient.queryTableEntityBundleAsyncGet(jobIdTokenStudyStatus, statusTableId);
+            QueryResultBundle queryResultStudyStatus = null;
+            for (int i = 0; i < SYNAPSE_RETRIES; i++) {
+                try {
+                    LOG.info("Retry get synapse study status table query result times: " + i);
+                    TimeUnit.SECONDS.sleep(SYNAPSE_SECONDS);
+                    queryResultStudyStatus = synapseClient.queryTableEntityBundleAsyncGet(jobIdTokenStudyStatus, statusTableId);
+                    break;
+                } catch (SynapseResultNotReadyException e) {
+                    // do nothing
+                }
+            }
+
+            if (queryResultStudyStatus == null) {
+                fail("Query study status table failed.");
+            }
+
             List<Row> studyStatusTableContents = queryResultStudyStatus.getQueryResult().getQueryResults().getRows();
 
             List<SelectColumn> studyStatusTableHeaders = queryResultStudyStatus.getQueryResult().getQueryResults().getHeaders();
@@ -785,7 +849,23 @@ public class ExportTest {
                 }
             }
 
-            QueryResultBundle queryResultSurvey = synapseClient.queryTableEntityBundleAsyncGet(jobIdTokenSurvey, schemaKeyTableId);
+            QueryResultBundle queryResultSurvey = null;
+
+            for (int i = 0; i < SYNAPSE_RETRIES; i++) {
+                try {
+                    LOG.info("Retry get synapse study status table query result times: " + i);
+                    TimeUnit.SECONDS.sleep(SYNAPSE_SECONDS);
+                    queryResultSurvey = synapseClient.queryTableEntityBundleAsyncGet(jobIdTokenSurvey, schemaKeyTableId);
+                    break;
+                } catch (SynapseResultNotReadyException e) {
+                    // do nothing
+                }
+            }
+
+            if (queryResultSurvey == null) {
+                fail("Query study status table failed.");
+            }
+
             List<Row> surveyTableContents = queryResultSurvey.getQueryResult().getQueryResults().getRows();
 
             List<SelectColumn> surveyTableHeaders = queryResultSurvey.getQueryResult().getQueryResults().getHeaders();
@@ -873,7 +953,8 @@ public class ExportTest {
         }
     }
 
-    private void verifyExportTime(long endDateTimeEpoch, boolean ignoreLastExportDateTime, boolean exportAll) {
+    private void verifyExportTime(long endDateTimeEpoch, boolean ignoreLastExportDateTime, boolean exportAll)
+            throws InterruptedException {
         if (!ignoreLastExportDateTime) {
             if (!exportAll) {
                 Item lastExportDateTime = ddbExportTimeTable.getItem("studyId", studyId);
@@ -883,6 +964,7 @@ public class ExportTest {
                 // the time recorded in export time table should be equal to the date time we submit to the export request
                 assertEquals(endDateTimeEpoch, lastExportDateTimeEpoch);
             } else {
+                //TimeUnit.SECONDS.sleep(40);
                 Iterable<Item> scanOutcomes = ddbScanHelper.scan(ddbExportTimeTable);
 
                 // verify if all studies' last export date time are modified
