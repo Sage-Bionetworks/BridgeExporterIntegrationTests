@@ -60,7 +60,6 @@ import org.sagebionetworks.bridge.data.JsonArchiveFile;
 import org.sagebionetworks.bridge.data.StudyUploadEncryptor;
 import org.sagebionetworks.bridge.dynamodb.DynamoScanHelper;
 import org.sagebionetworks.bridge.exporter.integration.config.BridgeExporterTestSpringConfig;
-import org.sagebionetworks.bridge.exporter.util.BridgeExporterUtil;
 import org.sagebionetworks.bridge.rest.RestUtils;
 import org.sagebionetworks.bridge.rest.api.ForConsentedUsersApi;
 import org.sagebionetworks.bridge.rest.api.ForDevelopersApi;
@@ -93,6 +92,7 @@ public class ExportTest {
     private static final Logger LOG = LoggerFactory.getLogger(ExportTest.class);
     private static final String ZIP_FILE = "./legacy-survey.zip";
     private static final String OUTPUT_FILE_NAME = "./legacy-survey-encrypted";
+    private static final String CONFIG_KEY_RECORD_ID_OVERRIDE_BUCKET = "record.id.override.bucket";
 
     private static final String TEST_FILES_A = "{\n" +
             "  \"questionType\":0,\n" +
@@ -247,7 +247,7 @@ public class ExportTest {
         synapseApiKey = bridgeConfig.get(SYNAPSE_API_KEY_NAME);
         testUserId = Long.parseLong(bridgeConfig.get(TEST_USER_ID_NAME));
         exporterSqsUrl = bridgeConfig.get("exporter.request.sqs.queue.url");
-        recordIdOverrideBucket = bridgeConfig.get(BridgeExporterUtil.CONFIG_KEY_RECORD_ID_OVERRIDE_BUCKET);
+        recordIdOverrideBucket = bridgeConfig.get(CONFIG_KEY_RECORD_ID_OVERRIDE_BUCKET);
     }
 
     @Before

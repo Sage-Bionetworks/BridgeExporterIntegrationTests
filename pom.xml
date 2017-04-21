@@ -118,11 +118,6 @@
             <artifactId>synapseJavaClient</artifactId>
             <version>161.0-4-g843de2c</version>
         </dependency>
-        <dependency>
-            <groupId>org.sagebionetworks</groupId>
-            <artifactId>Bridge-Exporter</artifactId>
-            <version>2.1</version>
-        </dependency>
     </dependencies>
 
     <repositories>
