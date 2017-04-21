@@ -410,7 +410,7 @@ public class ExportTest {
     }
 
     @Test
-    @Ignore
+    //@Ignore
     public void testDailyOnlyTestStudy() throws Exception {
         // modify uploadedOn field in record table to a fake datetime earlier than 24 hours ago -- this upload should never be exported
         UploadValidationStatus
@@ -625,14 +625,14 @@ public class ExportTest {
                 exporterRequest.set("studyWhitelist", studyWhitelistArray);
             }
 
-            exporterRequest.put("ignoreLastExportDateTime", ignoreLastExportDateTime);
+            exporterRequest.put("ignoreLastExportTime", ignoreLastExportDateTime);
         } else {
             exporterRequest = exporterRequestOri;
         }
 
         LOG.info("Time before request daily exporting: " + dateTimeBeforeExport.toString());
 
-        sqsHelper.sendMessageAsJson(exporterSqsUrl, JSON_OBJECT_MAPPER.writeValueAsString(exporterRequest), 0);
+        sqsHelper.sendMessageAsJson(exporterSqsUrl, exporterRequest, 0);
 
         if (exportAll) {
             TimeUnit.SECONDS.sleep(80);
@@ -689,12 +689,8 @@ public class ExportTest {
             // app version
             String jobIdTokenAppVersion = synapseClient.queryTableEntityBundleAsyncStart("select * from " + appVersionTableId, 0L, 100L, true, 0xF, appVersionTableId);
 
-            TimeUnit.SECONDS.sleep(3);
-
             // study status
             String jobIdTokenStudyStatus = synapseClient.queryTableEntityBundleAsyncStart("select * from " + statusTableId, 0L, 100L, true, 0xF, statusTableId);
-
-            TimeUnit.SECONDS.sleep(3);
 
             // survey table
             String jobIdTokenSurvey = synapseClient.queryTableEntityBundleAsyncStart("select * from " + schemaKeyTableId, 0L, 100L, true, 0xF, schemaKeyTableId);
