@@ -15,6 +15,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import org.sagebionetworks.bridge.config.Config;
+import org.sagebionetworks.bridge.config.Environment;
 import org.sagebionetworks.bridge.config.PropertiesConfig;
 import org.sagebionetworks.bridge.dynamodb.DynamoScanHelper;
 import org.sagebionetworks.bridge.s3.S3Helper;
@@ -85,27 +86,31 @@ public class BridgeExporterTestSpringConfig {
         return envName + '-' + userName + '-';
     }
 
-    @Bean(name = "env")
-    public String env() {
+    @Bean(name = "ddbExporterPrefix")
+    public String ddbExporterPrefix() {
         Config config = bridgeConfig();
-        String envName = config.getEnvironment().name().toLowerCase();
-        return envName;
+        return config.get("exporter.ddb.prefix");
+    }
+
+    @Bean(name = "env")
+    public Environment env() {
+        Config config = bridgeConfig();
+        return config.getEnvironment();
     }
 
     @Bean(name = "ddbExportTimeTable")
     public Table ddbExportTimeTable() {
-
         return ddbClient().getTable(ddbPrefix() + "ExportTime");
     }
 
     @Bean(name = "ddbSynapseMetaTables")
     public Table ddbSynapseMetaTables() {
-        return ddbClient().getTable(ddbPrefix() + "SynapseMetaTables");
+        return ddbClient().getTable(ddbExporterPrefix() + "SynapseMetaTables");
     }
 
     @Bean(name = "ddbSynapseTables")
     public Table ddbSynapseTables() {
-        return ddbClient().getTable(ddbPrefix() + "SynapseTables");
+        return ddbClient().getTable(ddbExporterPrefix() + "SynapseTables");
     }
 
     @Bean(name = "ddbRecordTable")
