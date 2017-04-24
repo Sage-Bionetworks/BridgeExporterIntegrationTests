@@ -152,12 +152,14 @@ public class ExportTest {
     private static final int UPLOAD_STATUS_DELAY_MILLISECONDS = 5000;
     private static final int EXPORT_SINGLE_SECONDS = 10;
     private static final int EXPORT_ALL_SECONDS = 20;
-    private static final int SYNAPSE_SECONDS = 3;
+    private static final int SYNAPSE_SECONDS = 4;
+    private static final int SYNAPSE_RETRY_DELAY = 10;
 
     // Retry up to 6 times, so we don't spend more than 30 seconds per test.
     private static final int UPLOAD_STATUS_DELAY_RETRIES = 6;
     private static final int EXPORT_RETRIES = 5;
     private static final int SYNAPSE_RETRIES = 5;
+    private static final int SYNAPSE_QUERY_RETRIES = 3;
 
     private static final String USER_NAME = "synapse.user";
     private static final String SYNAPSE_API_KEY_NAME = "synapse.api.key";
@@ -349,7 +351,6 @@ public class ExportTest {
     }
 
     @Test
-    //@Ignore
     public void testInstant() throws Exception {
         DateTime dateTimeBeforeExport = DateTime.now();
         Long epochBeforeExport = dateTimeBeforeExport.minusMinutes(3).getMillis(); // use for later verification
@@ -366,9 +367,6 @@ public class ExportTest {
         ForDevelopersApi forDevelopersApi = developer.getClient(ForDevelopersApi.class);
         Response<Message> response = forDevelopersApi.requestInstantExport().execute();
         assertEquals(202, response.code());
-
-        // sleep a while to wait for exporter
-        //TimeUnit.SECONDS.sleep(10);
 
         // verify
         verifyExport(uploadId, 0, false, false);
@@ -399,9 +397,6 @@ public class ExportTest {
         Response<Message> response2 = forDevelopersApi.requestInstantExport().execute();
         assertEquals(202, response2.code());
 
-        // sleep a while to wait for exporter
-        TimeUnit.SECONDS.sleep(30);
-
         // verify
         verifyExport(uploadId2, 1, false, false);
 
@@ -415,7 +410,6 @@ public class ExportTest {
     }
 
     @Test
-    //@Ignore
     public void testDailyOnlyTestStudy() throws Exception {
         // modify uploadedOn field in record table to a fake datetime earlier than 24 hours ago -- this upload should never be exported
         UploadValidationStatus
@@ -454,7 +448,6 @@ public class ExportTest {
     }
 
     @Test
-    //@Ignore
     public void testDailyAllStudies() throws Exception {
         assertExport(null, ExportType.DAILY, uploadId, 0, true, false, false);
 
@@ -467,7 +460,6 @@ public class ExportTest {
     }
 
     @Test
-    //@Ignore
     public void testHourlyOnlyTestStudy() throws Exception {
         // modify uploadedOn field in record table to a fake datetime earlier than 1 hour ago
         UploadValidationStatus
@@ -502,7 +494,6 @@ public class ExportTest {
     }
 
     @Test
-    //@Ignore
     public void testDailyIgnoreLastExportDateTime() throws Exception {
         // first modify uploadedOn value for test upload
         UploadValidationStatus uploadStatus = user.getClient(ForConsentedUsersApi.class).getUploadStatus(uploadId).execute().body();
@@ -519,7 +510,6 @@ public class ExportTest {
     }
 
     @Test
-    //@Ignore
     public void testHourlyIgnoreLastExportDateTime() throws Exception {
         UploadValidationStatus uploadStatus = user.getClient(ForConsentedUsersApi.class).getUploadStatus(uploadId).execute().body();
         ddbRecordTable.updateItem("id", uploadStatus.getRecord().getId(),
@@ -535,7 +525,6 @@ public class ExportTest {
     }
 
     @Test
-    //@Ignore
     public void testEndDateTimeBeforeLastExportDateTime() throws Exception {
         DateTime dateTimeBeforeExport = DateTime.now();
         ObjectNode exporterRequest = JSON_OBJECT_MAPPER.createObjectNode();
@@ -544,7 +533,7 @@ public class ExportTest {
         exporterRequest.put("endDateTime", dateTimeBeforeExport.toString());
         ArrayNode studyWhitelistArray = JSON_OBJECT_MAPPER.createArrayNode();
         studyWhitelistArray.add(studyId);
-        exporterRequest.set("studyWhiteList", studyWhitelistArray);
+        exporterRequest.set("studyWhitelist", studyWhitelistArray);
 
         ddbExportTimeTable.putItem(new Item().withPrimaryKey("studyId", studyId)
                 .withNumber("lastExportDateTime", dateTimeBeforeExport.getMillis()));
@@ -559,7 +548,7 @@ public class ExportTest {
         exporterRequest.put("endDateTime", dateTimeBeforeExport.minusHours(1).toString());
         studyWhitelistArray = JSON_OBJECT_MAPPER.createArrayNode();
         studyWhitelistArray.add(studyId);
-        exporterRequest.set("studyWhiteList", studyWhitelistArray);
+        exporterRequest.set("studyWhitelist", studyWhitelistArray);
 
         sqsHelper.sendMessageAsJson(exporterSqsUrl, JSON_OBJECT_MAPPER.writeValueAsString(exporterRequest), 0);
 
@@ -571,7 +560,6 @@ public class ExportTest {
     }
 
     @Test
-    //@Ignore
     public void testS3Override() throws Exception {
         UploadValidationStatus
                 uploadStatus = user.getClient(ForConsentedUsersApi.class).getUploadStatus(uploadId).execute().body();
@@ -592,7 +580,7 @@ public class ExportTest {
         exporterRequest.put("endDateTime", dateTimeBeforeExport.toString());
         ArrayNode studyWhitelistArray = JSON_OBJECT_MAPPER.createArrayNode();
         studyWhitelistArray.add(studyId);
-        exporterRequest.set("studyWhiteList", studyWhitelistArray);
+        exporterRequest.set("studyWhitelist", studyWhitelistArray);
         exporterRequest.put("recordIdS3Override", s3FileName);
 
         // assert only the first upload was exported
@@ -724,36 +712,55 @@ public class ExportTest {
             Item uploadRecord = ddbRecordTable.getItem("id", uploadStatus.getRecord().getId());
 
             // app version
-            String jobIdTokenAppVersion = synapseClient.queryTableEntityBundleAsyncStart("select * from " + appVersionTableId, 0L, 100L, true, 0xF, appVersionTableId);
+            String jobIdTokenAppVersion = synapseClient.queryTableEntityBundleAsyncStart("select * from " + appVersionTableId
+                            + " where recordId=\'" + uploadStatus.getRecord().getId() + "\'"
+                    , 0L, 100L, true, 0xF, appVersionTableId);
 
             // study status
             String jobIdTokenStudyStatus = synapseClient.queryTableEntityBundleAsyncStart("select * from " + statusTableId, 0L, 100L, true, 0xF, statusTableId);
 
             // survey table
-            String jobIdTokenSurvey = synapseClient.queryTableEntityBundleAsyncStart("select * from " + schemaKeyTableId, 0L, 100L, true, 0xF, schemaKeyTableId);
+            String jobIdTokenSurvey = synapseClient.queryTableEntityBundleAsyncStart("select * from " + schemaKeyTableId
+                            + " where recordId=\'" + uploadStatus.getRecord().getId() + "\'"
+                    , 0L, 100L, true, 0xF, schemaKeyTableId);
 
             QueryResultBundle queryResultAppVersion = null;
-            for (int i = 0; i < SYNAPSE_RETRIES; i++) {
-                try {
-                    LOG.info("Retry get synapse app version table query result times: " + i);
-                    TimeUnit.SECONDS.sleep(SYNAPSE_SECONDS);
-                    queryResultAppVersion = synapseClient.queryTableEntityBundleAsyncGet(jobIdTokenAppVersion, appVersionTableId);
-                    break;
-                } catch (SynapseResultNotReadyException e) {
-                    // do nothing
+            List<Row> tableContents = null;
+
+            for (int i = 0; i < SYNAPSE_QUERY_RETRIES; i ++) {
+                LOG.info("Re-query synapse app version table times: " + i);
+                for (int j = 0; j < SYNAPSE_RETRIES; j++) {
+                    try {
+                        LOG.info("Retry get synapse app version table query result times: " + j);
+                        queryResultAppVersion = synapseClient.queryTableEntityBundleAsyncGet(jobIdTokenAppVersion, appVersionTableId);
+                        break;
+                    } catch (SynapseResultNotReadyException e) {
+                        TimeUnit.SECONDS.sleep(SYNAPSE_SECONDS);
+                    }
                 }
+
+                if (queryResultAppVersion == null) {
+                    fail("Query app version table failed.");
+                }
+
+                // re-query table if the content is not up-dated
+                tableContents = queryResultAppVersion.getQueryResult().getQueryResults().getRows();
+                if (tableContents.size() != 0) {
+                    break;
+                }
+
+                TimeUnit.SECONDS.sleep(SYNAPSE_RETRY_DELAY);
+
+                jobIdTokenAppVersion = synapseClient.queryTableEntityBundleAsyncStart("select * from " + appVersionTableId
+                                + " where recordId=\'" + uploadStatus.getRecord().getId() + "\'"
+                        , 0L, 100L, true, 0xF, appVersionTableId);
             }
 
-            if (queryResultAppVersion == null) {
-                fail("Query app version table failed.");
-            }
+            // verify the size of the table is equal to the queried upload
+            assertEquals(1, tableContents.size());
 
             List<SelectColumn> tableHeaders = queryResultAppVersion.getQueryResult().getQueryResults().getHeaders();
-            List<Row> tableContents = queryResultAppVersion.getQueryResult().getQueryResults().getRows();
-            List<String> rowContent = tableContents.get(offset).getValues();
-
-            // verify the size of the table is equal to the number of uploads
-            assertEquals(offset + 1, tableContents.size());
+            List<String> rowContent = tableContents.get(0).getValues();
 
             // verify each column
             for (int i = 0; i < tableHeaders.size(); i++) {
@@ -796,7 +803,6 @@ public class ExportTest {
                     case "createdOnTimeZone": {
                         ZonedDateTime zDateTime = ZonedDateTime.parse(dateTimeNow.toString(), DateTimeFormatter.ISO_ZONED_DATE_TIME);
                         String zoneStr = zDateTime.getZone().getId().replaceAll(":", "");
-                        System.out.println("======= time zone from now: " + zoneStr);
                         assertEquals(zoneStr, columnValue);
                         break;
                     }
@@ -813,28 +819,39 @@ public class ExportTest {
             }
 
             QueryResultBundle queryResultStudyStatus = null;
-            for (int i = 0; i < SYNAPSE_RETRIES; i++) {
-                try {
-                    LOG.info("Retry get synapse study status table query result times: " + i);
-                    TimeUnit.SECONDS.sleep(SYNAPSE_SECONDS);
-                    queryResultStudyStatus = synapseClient.queryTableEntityBundleAsyncGet(jobIdTokenStudyStatus, statusTableId);
-                    break;
-                } catch (SynapseResultNotReadyException e) {
-                    // do nothing
+            List<Row> studyStatusTableContents = null;
+
+            for (int i = 0 ; i < SYNAPSE_QUERY_RETRIES; i++) {
+                LOG.info("Re-query synapse status table times: " + i);
+                for (int j = 0; i < SYNAPSE_RETRIES; j++) {
+                    try {
+                        LOG.info("Retry get synapse study status table query result times: " + j);
+                        queryResultStudyStatus = synapseClient.queryTableEntityBundleAsyncGet(jobIdTokenStudyStatus, statusTableId);
+                        break;
+                    } catch (SynapseResultNotReadyException e) {
+                        TimeUnit.SECONDS.sleep(SYNAPSE_SECONDS);
+                    }
                 }
+
+                if (queryResultStudyStatus == null) {
+                    fail("Query study status table failed.");
+                }
+
+                studyStatusTableContents = queryResultStudyStatus.getQueryResult().getQueryResults().getRows();
+
+                if (studyStatusTableContents.size() == offset + 1) {
+                    break;
+                }
+
+                TimeUnit.SECONDS.sleep(SYNAPSE_RETRY_DELAY);
+
+                jobIdTokenStudyStatus = synapseClient.queryTableEntityBundleAsyncStart("select * from " + statusTableId, 0L, 100L, true, 0xF, statusTableId);
             }
 
-            if (queryResultStudyStatus == null) {
-                fail("Query study status table failed.");
-            }
-
-            List<Row> studyStatusTableContents = queryResultStudyStatus.getQueryResult().getQueryResults().getRows();
+            assertEquals(offset + 1, studyStatusTableContents.size());
 
             List<SelectColumn> studyStatusTableHeaders = queryResultStudyStatus.getQueryResult().getQueryResults().getHeaders();
             List<String> studyStatusRowContent = studyStatusTableContents.get(offset).getValues();
-
-            // verify the size of the table is equal to the number of uploads
-            assertEquals(offset + 1, studyStatusTableContents.size());
 
             for (int i = 0; i < studyStatusTableHeaders.size(); i++) {
                 String headerName = studyStatusTableHeaders.get(i).getName();
@@ -850,29 +867,41 @@ public class ExportTest {
             }
 
             QueryResultBundle queryResultSurvey = null;
+            List<Row> surveyTableContents = null;
 
-            for (int i = 0; i < SYNAPSE_RETRIES; i++) {
-                try {
-                    LOG.info("Retry get synapse study status table query result times: " + i);
-                    TimeUnit.SECONDS.sleep(SYNAPSE_SECONDS);
-                    queryResultSurvey = synapseClient.queryTableEntityBundleAsyncGet(jobIdTokenSurvey, schemaKeyTableId);
-                    break;
-                } catch (SynapseResultNotReadyException e) {
-                    // do nothing
+            for (int i = 0; i < SYNAPSE_QUERY_RETRIES; i ++) {
+                LOG.info("Re-query synapse survey table times: " + i);
+                for (int j = 0; j < SYNAPSE_RETRIES; j++) {
+                    try {
+                        LOG.info("Retry get synapse survey table query result times: " + j);
+                        queryResultSurvey = synapseClient.queryTableEntityBundleAsyncGet(jobIdTokenSurvey, schemaKeyTableId);
+                        break;
+                    } catch (SynapseResultNotReadyException e) {
+                        TimeUnit.SECONDS.sleep(SYNAPSE_SECONDS);
+                    }
                 }
+
+                if (queryResultSurvey == null) {
+                    fail("Query survey table failed.");
+                }
+
+                surveyTableContents = queryResultSurvey.getQueryResult().getQueryResults().getRows();
+                if (surveyTableContents.size() != 0) {
+                    break;
+                }
+
+                TimeUnit.SECONDS.sleep(SYNAPSE_RETRY_DELAY);
+
+                jobIdTokenSurvey = synapseClient.queryTableEntityBundleAsyncStart("select * from " + schemaKeyTableId
+                                + " where recordId=\'" + uploadStatus.getRecord().getId() + "\'"
+                        , 0L, 100L, true, 0xF, schemaKeyTableId);
             }
-
-            if (queryResultSurvey == null) {
-                fail("Query study status table failed.");
-            }
-
-            List<Row> surveyTableContents = queryResultSurvey.getQueryResult().getQueryResults().getRows();
-
-            List<SelectColumn> surveyTableHeaders = queryResultSurvey.getQueryResult().getQueryResults().getHeaders();
-            List<String> surveyRowContent = surveyTableContents.get(offset).getValues();
 
             // verify the size of the table is equal to the number of uploads
-            assertEquals(offset + 1, surveyTableContents.size());
+            assertEquals(1, surveyTableContents.size());
+
+            List<SelectColumn> surveyTableHeaders = queryResultSurvey.getQueryResult().getQueryResults().getHeaders();
+            List<String> surveyRowContent = surveyTableContents.get(0).getValues();
 
             // verify each column
             for (int i = 0; i < surveyTableHeaders.size(); i++) {
@@ -915,7 +944,6 @@ public class ExportTest {
                     case "createdOnTimeZone": {
                         ZonedDateTime zDateTime = ZonedDateTime.parse(dateTimeNow.toString(), DateTimeFormatter.ISO_ZONED_DATE_TIME);
                         String zoneStr = zDateTime.getZone().getId().replaceAll(":", "");
-                        System.out.println("======= time zone from now: " + zoneStr);
                         assertEquals(zoneStr, columnValue);
                         break;
                     }
@@ -964,12 +992,26 @@ public class ExportTest {
                 // the time recorded in export time table should be equal to the date time we submit to the export request
                 assertEquals(endDateTimeEpoch, lastExportDateTimeEpoch);
             } else {
-                //TimeUnit.SECONDS.sleep(40);
-                Iterable<Item> scanOutcomes = ddbScanHelper.scan(ddbExportTimeTable);
+                Iterable<Item> scanOutcomes;
+                long lastExportDateTimeEpoch;
+                for (int i = 0; i < 3; i++) {
+                    scanOutcomes = ddbScanHelper.scan(ddbExportTimeTable);
+
+                    // verify if all studies' last export date time are modified
+                    for (Item item: scanOutcomes) {
+                        lastExportDateTimeEpoch = item.getLong("lastExportDateTime");
+                        if (endDateTimeEpoch != lastExportDateTimeEpoch) {
+                            LOG.info("Re-try get last export date time: " + i);
+                            TimeUnit.SECONDS.sleep(10);
+                        }
+                    }
+                }
+
+                scanOutcomes = ddbScanHelper.scan(ddbExportTimeTable);
 
                 // verify if all studies' last export date time are modified
                 for (Item item: scanOutcomes) {
-                    long lastExportDateTimeEpoch = item.getLong("lastExportDateTime");
+                    lastExportDateTimeEpoch = item.getLong("lastExportDateTime");
                     assertEquals(endDateTimeEpoch, lastExportDateTimeEpoch);
                 }
             }
