@@ -774,25 +774,17 @@ public class ExportTest {
 
         // only wait for ignoreLastExportDateTime since in this case we cannot verify export time table right now
         if (ignoreLastExportDateTime) {
-            if (exportAll) {
-                for (int i = 0; i < EXPORT_RETRIES; i++) {
-                    LOG.info("Retry get export status times: " + i);
+            for (int i = 0; i < EXPORT_RETRIES; i++) {
+                LOG.info("Retry get export status times: " + i);
+                if (exportAll) {
                     TimeUnit.SECONDS.sleep(EXPORT_ALL_SECONDS);
-
-                    uploadStatus = forConsentedUsersApi.getUploadStatus(uploadId).execute().body();
-                    if (uploadStatus.getRecord().getSynapseExporterStatus() == SynapseExporterStatus.SUCCEEDED) {
-                        break;
-                    }
-                }
-            } else {
-                for (int i = 0; i < EXPORT_RETRIES; i++) {
-                    LOG.info("Retry get export status times: " + i);
+                } else {
                     TimeUnit.SECONDS.sleep(EXPORT_SINGLE_SECONDS);
+                }
 
-                    uploadStatus = forConsentedUsersApi.getUploadStatus(uploadId).execute().body();
-                    if (uploadStatus.getRecord().getSynapseExporterStatus() == SynapseExporterStatus.SUCCEEDED) {
-                        break;
-                    }
+                uploadStatus = forConsentedUsersApi.getUploadStatus(uploadId).execute().body();
+                if (uploadStatus.getRecord().getSynapseExporterStatus() == SynapseExporterStatus.SUCCEEDED) {
+                    break;
                 }
             }
         }
