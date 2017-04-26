@@ -543,6 +543,34 @@ public class ExportTest {
     }
 
     @Test
+    public void testDailyIgnoreLastExportDateTimeWithStartDateTime() throws Exception {
+        // first modify uploadedOn value earlier than default start date time
+        DateTime testStartDateTime = DateTime.now().minusDays(2);
+        UploadValidationStatus uploadStatus = user.getClient(ForConsentedUsersApi.class).getUploadStatus(uploadId).execute().body();
+        ddbRecordTable.updateItem("id", uploadStatus.getRecord().getId(),
+                new AttributeUpdate("uploadedOn").put(testStartDateTime.plus(1).getMillis()));
+
+        // then create a fake last export date time with value greater than uploadedOn
+        ddbExportTimeTable.putItem(new Item().withPrimaryKey("studyId", studyId)
+                .withNumber("lastExportDateTime", DateTime.now().minusMinutes(10).getMillis()));
+
+        // and create request with start date time
+        ObjectNode exporterRequest = JSON_OBJECT_MAPPER.createObjectNode();
+        exporterRequest.put("startDateTime", testStartDateTime.toString());
+        exporterRequest.put("endDateTime", DateTime.now().toString());
+        exporterRequest.put("exportType", ExportType.DAILY.name());
+        exporterRequest.put("tag", "ex integ test");
+        ArrayNode studyWhitelistArray = JSON_OBJECT_MAPPER.createArrayNode();
+        studyWhitelistArray.add(studyId);
+        exporterRequest.set("studyWhitelist", studyWhitelistArray);
+        exporterRequest.put("ignoreLastExportTime", true);
+
+        // then upload with ignore last export date time and with start date time
+        // we should see it exports the upload
+        assertExport(exporterRequest, ExportType.DAILY, uploadId, false, true);
+    }
+
+    @Test
     public void testHourlyIgnoreLastExportDateTime() throws Exception {
         UploadValidationStatus uploadStatus = user.getClient(ForConsentedUsersApi.class).getUploadStatus(uploadId).execute().body();
         ddbRecordTable.updateItem("id", uploadStatus.getRecord().getId(),
