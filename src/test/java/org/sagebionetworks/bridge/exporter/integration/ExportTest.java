@@ -352,6 +352,7 @@ public class ExportTest {
     }
 
     @Test
+    @Ignore
     public void testInstant() throws Exception {
         DateTime dateTimeBeforeExport = DateTime.now();
         Long epochBeforeExport = dateTimeBeforeExport.minusMinutes(20).getMillis(); // use for later verification
@@ -420,6 +421,7 @@ public class ExportTest {
     }
 
     @Test
+    @Ignore
     public void testDailyOnlyTestStudy() throws Exception {
         // modify uploadedOn field in record table to a fake datetime earlier than yesterday's midnight -- this upload should never be exported
         UploadValidationStatus
@@ -460,11 +462,13 @@ public class ExportTest {
     }
 
     @Test
+    @Ignore
     public void testDailyAllStudies() throws Exception {
         assertExport(null, ExportType.DAILY, uploadId, true, false, null, 0);
     }
 
     @Test
+    @Ignore
     public void testHourlyOnlyTestStudy() throws Exception {
         // modify uploadedOn field in record table to a fake datetime earlier than 2 hour ago
         UploadValidationStatus
@@ -501,6 +505,7 @@ public class ExportTest {
     }
 
     @Test
+    @Ignore
     public void testDailyIgnoreLastExportDateTime() throws Exception {
         // first modify uploadedOn value for test upload
         UploadValidationStatus uploadStatus = user.getClient(ForConsentedUsersApi.class).getUploadStatus(uploadId).execute().body();
@@ -517,6 +522,7 @@ public class ExportTest {
     }
 
     @Test
+    @Ignore
     public void testDailyIgnoreLastExportDateTimeWithStartDateTime() throws Exception {
         // first modify uploadedOn value earlier than default start date time
         DateTime testStartDateTime = DateTime.now().minusDays(2);
@@ -532,7 +538,6 @@ public class ExportTest {
         ObjectNode exporterRequest = JSON_OBJECT_MAPPER.createObjectNode();
         exporterRequest.put("startDateTime", testStartDateTime.toString());
         exporterRequest.put("endDateTime", DateTime.now().toString());
-        exporterRequest.put("exportType", ExportType.DAILY.name());
         exporterRequest.put("tag", "ex integ test");
         ArrayNode studyWhitelistArray = JSON_OBJECT_MAPPER.createArrayNode();
         studyWhitelistArray.add(studyId);
@@ -541,10 +546,11 @@ public class ExportTest {
 
         // then upload with ignore last export date time and with start date time
         // we should see it exports the upload
-        assertExport(exporterRequest, ExportType.DAILY, uploadId, false, true, null, 0);
+        assertExport(exporterRequest, null, uploadId, false, true, null, 0);
     }
 
     @Test
+    @Ignore
     public void testHourlyIgnoreLastExportDateTime() throws Exception {
         UploadValidationStatus uploadStatus = user.getClient(ForConsentedUsersApi.class).getUploadStatus(uploadId).execute().body();
         ddbRecordTable.updateItem("id", uploadStatus.getRecord().getId(),
@@ -596,6 +602,7 @@ public class ExportTest {
     }
 
     @Test
+    @Ignore
     public void testS3Override() throws Exception {
         UploadValidationStatus
                 uploadStatus = user.getClient(ForConsentedUsersApi.class).getUploadStatus(uploadId).execute().body();
