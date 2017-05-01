@@ -378,7 +378,7 @@ public class ExportTest {
         // the time recorded in export time table should be equal to the date time we submit to the export request
         assertTrue(lastExportDateTimeEpoch > epochBeforeExport);
 
-        verifyExport(uploadId, false, false, null, 0);
+        verifyExport(uploadId, false, false, false, null, 0);
 
         // then do another instant export, verify if it will export the second upload and not the first upload
         // modify last export date time to 15 min ago
@@ -407,7 +407,7 @@ public class ExportTest {
         // the time recorded in export time table should be equal to the date time we submit to the export request
         assertTrue(lastExportDateTimeEpochSecond > epochBeforeExport);
 
-        verifyExport(uploadId2, false, false, uploadId, 1);
+        verifyExport(uploadId2, false, false, false, uploadId, 1);
 
         // also verify the first upload was not exported twice
 
@@ -439,8 +439,7 @@ public class ExportTest {
                 new AttributeUpdate("uploadedOn").put(DateTime.now().minusHours(1).getMillis()));
 
         // assert only the second upload is exported
-        assertExport(null, ExportType.DAILY, uploadId2, false, false, uploadId, 0);
-        //verifyNotExport(uploadId, 0);
+        assertExport(null, ExportType.DAILY, uploadId2, false, false, false, uploadId, 0);
 
         // then modify last export date time to 40 min ago for later verification
         ddbExportTimeTable.updateItem("studyId", studyId, new AttributeUpdate("lastExportDateTime").put(DateTime.now().minusMinutes(40).getMillis()));
@@ -455,13 +454,12 @@ public class ExportTest {
                 new AttributeUpdate("uploadedOn").put(DateTime.now().minusMinutes(30).getMillis()));
 
         // assert only the third upload is exported -- that means it uses last export date time instead of default time range
-        assertExport(null, ExportType.DAILY, uploadId3, false, false, uploadId2, 1);
-        //verifyNotExport(uploadId2, 1);
+        assertExport(null, ExportType.DAILY, uploadId3, false, false, false, uploadId2, 1);
     }
 
     @Test
     public void testDailyAllStudies() throws Exception {
-        assertExport(null, ExportType.DAILY, uploadId, true, false, null, 0);
+        assertExport(null, ExportType.DAILY, uploadId, true, false, false, null, 0);
     }
 
     @Test
@@ -481,8 +479,7 @@ public class ExportTest {
         ddbRecordTable.updateItem("id", uploadStatus.getRecord().getId(),
                 new AttributeUpdate("uploadedOn").put(DateTime.now().minusMinutes(40).getMillis()));
 
-        assertExport(null, ExportType.HOURLY, uploadId2, false, false, uploadId, 0);
-        //verifyNotExport(uploadId, 0);
+        assertExport(null, ExportType.HOURLY, uploadId2, false, false, false, uploadId, 0);
 
         ddbExportTimeTable.updateItem("studyId", studyId, new AttributeUpdate("lastExportDateTime").put(DateTime.now().minusMinutes(30).getMillis()));
 
@@ -496,8 +493,7 @@ public class ExportTest {
                 new AttributeUpdate("uploadedOn").put(DateTime.now().minusMinutes(20).getMillis()));
 
         // check again
-        assertExport(null, ExportType.HOURLY, uploadId3, false, false, uploadId2, 1);
-        //verifyNotExport(uploadId2, 1);
+        assertExport(null, ExportType.HOURLY, uploadId3, false, false, false, uploadId2, 1);
     }
 
     @Test
@@ -513,7 +509,7 @@ public class ExportTest {
 
         // then upload with ignore last export date time
         // we should see it exports last upload again
-        assertExport(null, ExportType.DAILY, uploadId, false, true, null, 0);
+        assertExport(null, ExportType.DAILY, uploadId, false, true, false, null, 0);
     }
 
     @Test
@@ -540,7 +536,7 @@ public class ExportTest {
 
         // then upload with ignore last export date time and with start date time
         // we should see it exports the upload
-        assertExport(exporterRequest, null, uploadId, false, true, null, 0);
+        assertExport(exporterRequest, null, uploadId, false, true, false, null, 0);
     }
 
     @Test
@@ -555,7 +551,7 @@ public class ExportTest {
 
         // then upload with ignore last export date time
         // we should see it exports last upload again
-        assertExport(null, ExportType.HOURLY, uploadId, false, true, null, 0);
+        assertExport(null, ExportType.HOURLY, uploadId, false, true, false, null, 0);
     }
 
     @Test
@@ -575,7 +571,7 @@ public class ExportTest {
 
         // the second one will not export anything -- synapse table will remain the same
         // case of endDateTime is equal to the last export date time
-        assertExport(exporterRequest, null, uploadId, false, false, null, 0);
+        assertExport(exporterRequest, null, uploadId, false, false, false, null, 0);
 
         // then test case of endDateTime before lastExportDateTime -- there should be no change as well
         exporterRequest = JSON_OBJECT_MAPPER.createObjectNode();
@@ -620,8 +616,7 @@ public class ExportTest {
         exporterRequest.put("ignoreLastExportTime", true);
 
         // assert only the first upload was exported
-        assertExport(exporterRequest, null, uploadId, false, true, uploadId2, 0);
-        //verifyNotExport(uploadId2, 0);
+        assertExport(exporterRequest, null, uploadId, false, false, true, uploadId2, 0);
     }
 
     private Long getLastExportDateTime(Long epochBeforeExport) throws InterruptedException {
@@ -644,7 +639,7 @@ public class ExportTest {
     }
 
     private void assertExport(ObjectNode exporterRequestOrigin, ExportType exportType, String uploadId,
-            boolean exportAll, boolean ignoreLastExportDateTime, String notExpectUploadId, int notExpectUploadSize) throws IOException, InterruptedException, SynapseException {
+            boolean exportAll, boolean ignoreLastExportDateTime, boolean isS3Override, String notExpectUploadId, int notExpectUploadSize) throws IOException, InterruptedException, SynapseException {
         // prevent accidentally export all in prod env
         if (isProduction(env)) {
             if (exportAll || exporterRequestOrigin.get("studyWhitelist") == null) {
@@ -685,7 +680,7 @@ public class ExportTest {
                 verifyExportTime(DateTime.parse(exporterRequest.get("endDateTime").textValue()).getMillis(), exportAll);
             }
         }
-        verifyExport(uploadId, exportAll, ignoreLastExportDateTime, notExpectUploadId, notExpectUploadSize);
+        verifyExport(uploadId, exportAll, ignoreLastExportDateTime, isS3Override,notExpectUploadId, notExpectUploadSize);
     }
 
     private void verifyExportTime(long endDateTimeEpoch, boolean exportAll)
@@ -736,12 +731,12 @@ public class ExportTest {
         }
     }
 
-    private void verifyExport(String uploadId, boolean exportAll, boolean ignoreLastExportDateTime, String notExpectUploadId, int notExpectUploadSize) throws SynapseException, InterruptedException, IOException {
+    private void verifyExport(String uploadId, boolean exportAll, boolean ignoreLastExportDateTime, boolean isS3Override, String notExpectUploadId, int notExpectUploadSize) throws SynapseException, InterruptedException, IOException {
         ForConsentedUsersApi forConsentedUsersApi = user.getClient(ForConsentedUsersApi.class);
         UploadValidationStatus uploadStatus = forConsentedUsersApi.getUploadStatus(uploadId).execute().body();
 
         // only wait for ignoreLastExportDateTime since in this case we cannot verify export time table right now
-        if (ignoreLastExportDateTime) {
+        if (ignoreLastExportDateTime || isS3Override) {
             for (int i = 0; i < EXPORT_RETRIES; i++) {
                 LOG.info("Retry get export status times: " + i);
                 if (exportAll) {
