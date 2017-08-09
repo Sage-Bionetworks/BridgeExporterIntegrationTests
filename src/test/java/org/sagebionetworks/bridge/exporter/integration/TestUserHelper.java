@@ -4,11 +4,13 @@ import static com.google.common.base.Preconditions.checkNotNull;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 import com.google.common.collect.Lists;
+import org.apache.commons.lang3.RandomStringUtils;
 
 import org.sagebionetworks.bridge.rest.ClientManager;
 import org.sagebionetworks.bridge.rest.Config;
@@ -23,15 +25,16 @@ import org.sagebionetworks.bridge.rest.model.SignUp;
 import org.sagebionetworks.bridge.rest.model.UserSessionInfo;
 
 public class TestUserHelper {
-
     private static final List<String> LANGUAGES = Lists.newArrayList("en");
     private static final String PASSWORD = "P4ssword!";
+    private static final Config CONFIG = new Config();
+
     private static final ClientInfo CLIENT_INFO = new ClientInfo();
     static {
-        CLIENT_INFO.setAppName("Integration Tests");
-        CLIENT_INFO.setAppVersion(0);
+        CLIENT_INFO.setAppName("BridgeEX Integration Tests");
+        CLIENT_INFO.setAppVersion(1);
     }
-    
+
     public static class TestUser {
         private SignIn signIn;
         private ClientManager manager;
@@ -44,24 +47,6 @@ public class TestUserHelper {
             checkNotNull(manager);
             this.signIn = signIn;
             this.manager = manager;
-        }
-        public UserSessionInfo getSession() {
-            return userSession;
-        }
-        public String getEmail() {
-            return signIn.getEmail();
-        }
-        public String getPassword() {
-            return signIn.getPassword();
-        }
-        public List<Role> getRoles() {
-            return userSession.getRoles();
-        }
-        public String getDefaultSubpopulation() {
-            return signIn.getStudy();
-        }
-        public String getStudyId() {
-            return signIn.getStudy();
         }
         public <T> T getClient(Class<T> service) {
             return manager.getClient(service);
@@ -95,21 +80,11 @@ public class TestUserHelper {
         public SignIn getSignIn() {
             return signIn;
         }
-        public ClientManager getClientManager() {
-            return manager;
-        }
         public Config getConfig() {
             return manager.getConfig();
         }
-        public void setClientInfo(ClientInfo clientInfo) {
-            ClientManager man = new ClientManager.Builder()
-                    .withClientInfo(clientInfo)
-                    .withSignIn(signIn)
-                    .withConfig(manager.getConfig())
-                    .withAcceptLanguage(LANGUAGES).build();
-            this.manager = man;
-        }
     }
+
     public static TestUser getSignedInAdmin() {
         Config config = new Config();
         ClientManager adminManager = new ClientManager.Builder().withSignIn(config.getAdminSignIn())
@@ -119,17 +94,12 @@ public class TestUserHelper {
         return adminUser;
     }
 
-    public static TestUser createAndSignInUser(Class<?> cls, String studyId,boolean consentUser, Role... roles) throws IOException {
-        return new TestUserHelper.Builder(cls).withRoles(roles).withConsentUser(consentUser).createAndSignInUser(studyId);
+    public static TestUser createAndSignInUser(Class<?> cls, String studyId, boolean consentUser, Role... roles)
+            throws IOException {
+        return new TestUserHelper.Builder(cls).withRoles(roles).withConsentUser(consentUser).createAndSignInUser(
+                studyId);
     }
 
-    public static TestUser createAndSignInUser(Class<?> cls, boolean consentUser, Role... roles) throws IOException {
-        return new TestUserHelper.Builder(cls).withRoles(roles).withConsentUser(consentUser).createAndSignInUser();
-    }
-    public static TestUser createAndSignInUser(Class<?> cls, boolean consentUser, SignUp signUp) throws IOException {
-        return new TestUserHelper.Builder(cls).withConsentUser(consentUser).withSignUp(signUp).createAndSignInUser();
-    }
-    
     public static class Builder {
         private Class<?> cls;
         private boolean consentUser;
@@ -141,28 +111,15 @@ public class TestUserHelper {
             this.consentUser = consentUser;
             return this;
         }
-        public Builder withSignUp(SignUp signUp) {
-            this.signUp = signUp;
-            return this;
-        }
-        public Builder withClientInfo(ClientInfo clientInfo) {
-            this.clientInfo = clientInfo;
-            return this;
-        }
+
         public Builder withRoles(Role...roles) {
-            for (Role role : roles) {
-                this.roles.add(role);
-            }
+            Collections.addAll(this.roles, roles);
             return this;
         }
         
         public Builder(Class<?> cls) {
             checkNotNull(cls);
             this.cls = cls;
-        }
-
-        public TestUser createAndSignInUser() throws IOException {
-            return createAndSignInUser(Tests.TEST_KEY);
         }
 
         public TestUser createAndSignInUser(String studyId) throws IOException {
@@ -183,7 +140,7 @@ public class TestUserHelper {
             // For email address, we don't want consent emails to bounce or SES will get mad at us. All test user email
             // addresses should be in the form bridge-testing+[semi-unique token]@sagebase.org. This directs all test
             // email to bridge-testing@sagebase.org.
-            String emailAddress = Tests.makeEmail(cls);
+            String emailAddress = makeEmail(cls);
 
             if (signUp == null) {
                 signUp = new SignUp();
@@ -224,5 +181,12 @@ public class TestUserHelper {
                 throw new BridgeSDKException(ex.getMessage(), ex);
             }
         }
+    }
+
+    public static String makeEmail(Class<?> cls) {
+        String devName = CONFIG.getDevName();
+        String clsPart = cls.getSimpleName();
+        String rndPart = RandomStringUtils.randomAlphabetic(4);
+        return String.format("bridge-testing+%s-%s-%s@sagebase.org", devName, clsPart, rndPart);
     }
 }
