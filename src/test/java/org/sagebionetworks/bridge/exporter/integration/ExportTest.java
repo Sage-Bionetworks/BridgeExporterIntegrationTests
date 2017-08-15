@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -409,7 +410,7 @@ public class ExportTest {
         assertEquals(lastExportDateTimeEpoch.longValue(), endDateTimeEpoch);
     }
 
-    private void verifyExport(String expectedUploadId, int expectedUploadCount) throws Exception {
+    private void verifyExport(String expectedUploadId, final int expectedUploadCount) throws Exception {
         ForConsentedUsersApi forConsentedUsersApi = user.getClient(ForConsentedUsersApi.class);
         UploadValidationStatus uploadStatus = null;
 
@@ -429,17 +430,25 @@ public class ExportTest {
 
         // query appVersion table
         Item appVersionItem = ddbSynapseMetaTables.getItem("tableName", TEST_STUDY_ID + "-appVersion");
-        String appVersionTableId = appVersionItem.getString("tableId");
+        final String appVersionTableId = appVersionItem.getString("tableId");
         assertFalse(StringUtils.isBlank(appVersionTableId));
-        Future<RowSet> appVersionFuture = executorService.submit(() -> querySynapseTable(appVersionTableId, recordId,
-                expectedUploadCount));
+        Future<RowSet> appVersionFuture = executorService.submit(new Callable<RowSet>() {
+            @Override
+            public RowSet call() throws Exception {
+                return querySynapseTable(appVersionTableId, recordId, expectedUploadCount);
+            }
+        });
 
         // query survey result table
         Item surveyItem = ddbSynapseTables.getItem("schemaKey", TEST_STUDY_ID + "-legacy-survey-v1");
-        String surveyTableId = surveyItem.getString("tableId");
+        final String surveyTableId = surveyItem.getString("tableId");
         assertFalse(StringUtils.isBlank(surveyTableId));
-        Future<RowSet> surveyFuture = executorService.submit(() -> querySynapseTable(surveyTableId, recordId,
-                expectedUploadCount));
+        Future<RowSet> surveyFuture = executorService.submit(new Callable<RowSet>() {
+            @Override
+            public RowSet call() throws Exception {
+                return querySynapseTable(surveyTableId, recordId, expectedUploadCount);
+            }
+        });
 
         // wait for table results
         RowSet appVersionRowSet = appVersionFuture.get();
