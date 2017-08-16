@@ -7,12 +7,10 @@ import static org.testng.Assert.assertTrue;
 import static org.testng.Assert.fail;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
-import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -50,15 +48,10 @@ import org.testng.annotations.Test;
 import org.sagebionetworks.bridge.config.Config;
 import org.sagebionetworks.bridge.config.Environment;
 import org.sagebionetworks.bridge.config.PropertiesConfig;
-import org.sagebionetworks.bridge.data.Archive;
-import org.sagebionetworks.bridge.data.JsonArchiveFile;
-import org.sagebionetworks.bridge.data.StudyUploadEncryptor;
 import org.sagebionetworks.bridge.rest.RestUtils;
 import org.sagebionetworks.bridge.rest.api.ForConsentedUsersApi;
-import org.sagebionetworks.bridge.rest.api.ForDevelopersApi;
 import org.sagebionetworks.bridge.rest.api.UploadSchemasApi;
 import org.sagebionetworks.bridge.rest.exceptions.EntityNotFoundException;
-import org.sagebionetworks.bridge.rest.model.CmsPublicKey;
 import org.sagebionetworks.bridge.rest.model.HealthDataRecord;
 import org.sagebionetworks.bridge.rest.model.Role;
 import org.sagebionetworks.bridge.rest.model.SharingScope;
@@ -83,29 +76,9 @@ public class ExportTest {
 
     private static final String CONFIG_KEY_RECORD_ID_OVERRIDE_BUCKET = "record.id.override.bucket";
     private static final ObjectMapper JSON_OBJECT_MAPPER = new ObjectMapper();
-    private static final String ZIP_FILE = "./legacy-survey.zip";
-    private static final String OUTPUT_FILE_NAME = "./legacy-survey-encrypted";
     private static final String TEST_STUDY_ID = "api";
 
-    private static final String TEST_FILES_A = "{\n" +
-            "  \"questionType\":0,\n" +
-            "  \"choiceAnswers\":[\"Yes\"],\n" +
-            "  \"startDate\":\"2015-04-02T03:26:57-07:00\",\n" +
-            "  \"questionTypeName\":\"SingleChoice\",\n" +
-            "  \"item\":\"AAA\",\n" +
-            "  \"endDate\":\"2015-04-02T03:26:59-07:00\"\n" +
-            "}";
-
-    private static final String TEST_FILES_B = "{\n" +
-            "  \"questionType\":0,\n" +
-            "  \"choiceAnswers\":[\"fencing\", \"running\", 3],\n" +
-            "  \"startDate\":\"2015-04-02T03:26:57-07:00\",\n" +
-            "  \"questionTypeName\":\"MultipleChoice\",\n" +
-            "  \"item\":\"BBB\",\n" +
-            "  \"endDate\":\"2015-04-02T03:26:59-07:00\"\n" +
-            "}";
-
-    private static final String CREATED_ON_STR = "2017-04-26T03:26:59-07:00";
+    private static final String CREATED_ON_STR = "2015-04-02T03:27:09-07:00";
     private static final DateTime CREATED_ON = DateTime.parse(CREATED_ON_STR);
     private static final String CREATED_ON_TIME_ZONE = "-0700";
     private static final int UPLOAD_STATUS_DELAY_MILLISECONDS = 5000;
@@ -127,6 +100,7 @@ public class ExportTest {
     private static SynapseClient synapseClient;
 
     // config values
+    private static Environment env;
     private static String exporterSqsUrl;
     private static String recordIdOverrideBucket;
 
@@ -169,7 +143,7 @@ public class ExportTest {
         }
 
         // config vars
-        Environment env = bridgeConfig.getEnvironment();
+        env = bridgeConfig.getEnvironment();
         exporterSqsUrl = bridgeConfig.get("exporter.request.sqs.queue.url");
         recordIdOverrideBucket = bridgeConfig.get(CONFIG_KEY_RECORD_ID_OVERRIDE_BUCKET);
         String synapseUser = bridgeConfig.get(USER_NAME);
@@ -258,8 +232,7 @@ public class ExportTest {
     @BeforeMethod
     public void before() throws Exception {
         // create and encrypt test files
-        createAndEncryptTestFiles(TEST_FILES_A, TEST_FILES_B);
-        uploadId = uploadAndVerify("./legacy-survey-encrypted");
+        uploadId = uploadAndVerify("legacy-survey-encrypted");
 
         // set uploadedOn to 10 min ago.
         UploadValidationStatus uploadStatus = user.getClient(ForConsentedUsersApi.class).getUploadStatus(uploadId)
@@ -432,23 +405,15 @@ public class ExportTest {
         Item appVersionItem = ddbSynapseMetaTables.getItem("tableName", TEST_STUDY_ID + "-appVersion");
         final String appVersionTableId = appVersionItem.getString("tableId");
         assertFalse(StringUtils.isBlank(appVersionTableId));
-        Future<RowSet> appVersionFuture = executorService.submit(new Callable<RowSet>() {
-            @Override
-            public RowSet call() throws Exception {
-                return querySynapseTable(appVersionTableId, recordId, expectedUploadCount);
-            }
-        });
+        Future<RowSet> appVersionFuture = executorService.submit(() -> querySynapseTable(appVersionTableId, recordId,
+                expectedUploadCount));
 
         // query survey result table
         Item surveyItem = ddbSynapseTables.getItem("schemaKey", TEST_STUDY_ID + "-legacy-survey-v1");
         final String surveyTableId = surveyItem.getString("tableId");
         assertFalse(StringUtils.isBlank(surveyTableId));
-        Future<RowSet> surveyFuture = executorService.submit(new Callable<RowSet>() {
-            @Override
-            public RowSet call() throws Exception {
-                return querySynapseTable(surveyTableId, recordId, expectedUploadCount);
-            }
-        });
+        Future<RowSet> surveyFuture = executorService.submit(() -> querySynapseTable(surveyTableId, recordId,
+                expectedUploadCount));
 
         // wait for table results
         RowSet appVersionRowSet = appVersionFuture.get();
@@ -583,32 +548,9 @@ public class ExportTest {
         }
     }
 
-    private void createAndEncryptTestFiles(String testFilesA, String testFilesB) throws Exception {
-        JsonArchiveFile test_file_A = new JsonArchiveFile("AAA.json", CREATED_ON, testFilesA);
-        JsonArchiveFile test_file_B = new JsonArchiveFile("BBB.json", CREATED_ON, testFilesB);
-
-        Archive archive = Archive.Builder.forActivity("legacy-survey", 1)
-                .withAppVersionName("version 1.0.0, build 1")
-                .withPhoneInfo("Integration Tests")
-                .addDataFile(test_file_A)
-                .addDataFile(test_file_B).build();
-
-        // zip
-        FileOutputStream fos = new FileOutputStream(ZIP_FILE);
-        archive.writeTo(fos);
-
-        // encrypt it
-        String inputFilePath = new File(ZIP_FILE).getCanonicalPath();
-        String outputFilePath = new File(OUTPUT_FILE_NAME).getCanonicalPath();
-
-        ForDevelopersApi forDevelopersApi =  developer.getClient(ForDevelopersApi.class);
-        CmsPublicKey publicKey = forDevelopersApi.getStudyPublicCsmKey().execute().body();
-
-        StudyUploadEncryptor.writeTo(publicKey.getPublicKey(), inputFilePath, outputFilePath);
-    }
-
-    private static String uploadAndVerify(String filePath) throws Exception {
+    private static String uploadAndVerify(String fileLeafName) throws Exception {
         // set up request
+        String filePath = resolveFilePath(fileLeafName);
         File file = new File(filePath);
 
         ForConsentedUsersApi usersApi = user.getClient(ForConsentedUsersApi.class);
@@ -646,5 +588,11 @@ public class ExportTest {
         assertNotNull(DateTime.parse("2017-01-25T16:36" + record.getCreatedOnTimeZone()));
 
         return uploadId;
+    }
+
+    // returns the path relative to the root of the project
+    private static String resolveFilePath(String fileLeafName) {
+        String envName = env.name().toLowerCase();
+        return "src/test/resources/upload-test/" + envName + "/" + fileLeafName;
     }
 }
