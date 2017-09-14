@@ -432,7 +432,7 @@ public class ExportTest {
             String columnValue = appVersionColumnList.get(i);
 
             if (headerName.equals("originalTable")) {
-                assertEquals(columnValue, TEST_STUDY_ID + "-legacy-survey-v1");
+                assertEquals(columnValue, "legacy-survey-v1");
             } else {
                 commonColumnsVerification(headerName, columnValue, recordId, uploadRecord);
             }
