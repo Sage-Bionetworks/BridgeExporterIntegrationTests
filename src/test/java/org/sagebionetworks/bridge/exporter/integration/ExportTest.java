@@ -4,13 +4,15 @@ import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertNotNull;
 import static org.testng.Assert.assertTrue;
-import static org.testng.Assert.fail;
 
-import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -28,8 +30,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.RandomStringUtils;
 import org.joda.time.DateTime;
 import org.sagebionetworks.client.SynapseClient;
 import org.sagebionetworks.client.SynapseClientImpl;
@@ -48,22 +52,21 @@ import org.testng.annotations.Test;
 import org.sagebionetworks.bridge.config.Config;
 import org.sagebionetworks.bridge.config.Environment;
 import org.sagebionetworks.bridge.config.PropertiesConfig;
-import org.sagebionetworks.bridge.rest.RestUtils;
 import org.sagebionetworks.bridge.rest.api.ForConsentedUsersApi;
+import org.sagebionetworks.bridge.rest.api.HealthDataApi;
+import org.sagebionetworks.bridge.rest.api.StudiesApi;
 import org.sagebionetworks.bridge.rest.api.UploadSchemasApi;
 import org.sagebionetworks.bridge.rest.exceptions.EntityNotFoundException;
 import org.sagebionetworks.bridge.rest.model.HealthDataRecord;
+import org.sagebionetworks.bridge.rest.model.HealthDataSubmission;
 import org.sagebionetworks.bridge.rest.model.Role;
 import org.sagebionetworks.bridge.rest.model.SharingScope;
+import org.sagebionetworks.bridge.rest.model.Study;
 import org.sagebionetworks.bridge.rest.model.StudyParticipant;
-import org.sagebionetworks.bridge.rest.model.SynapseExporterStatus;
 import org.sagebionetworks.bridge.rest.model.UploadFieldDefinition;
 import org.sagebionetworks.bridge.rest.model.UploadFieldType;
 import org.sagebionetworks.bridge.rest.model.UploadSchema;
 import org.sagebionetworks.bridge.rest.model.UploadSchemaType;
-import org.sagebionetworks.bridge.rest.model.UploadSession;
-import org.sagebionetworks.bridge.rest.model.UploadStatus;
-import org.sagebionetworks.bridge.rest.model.UploadValidationStatus;
 import org.sagebionetworks.bridge.s3.S3Helper;
 import org.sagebionetworks.bridge.sqs.SqsHelper;
 
@@ -78,15 +81,26 @@ public class ExportTest {
     private static final ObjectMapper JSON_OBJECT_MAPPER = new ObjectMapper();
     private static final String TEST_STUDY_ID = "api";
 
+    private static final String APP_VERSION = "version 1.0.2, build 2";
     private static final String CREATED_ON_STR = "2015-04-02T03:27:09-07:00";
     private static final DateTime CREATED_ON = DateTime.parse(CREATED_ON_STR);
     private static final String CREATED_ON_TIME_ZONE = "-0700";
-    private static final int UPLOAD_STATUS_DELAY_MILLISECONDS = 5000;
+    private static final String METADATA_FIELD_NAME = "integTestRunId";
+    private static final int METADATA_FIELD_LENGTH = 4;
+    private static final String METADATA_SYNAPSE_COLUMN_NAME = "metadata." + METADATA_FIELD_NAME;
+    private static final String PHONE_INFO = "BridgeEXIntegTest";
+    private static final String SCHEMA_ID = "legacy-survey";
+    private static final long SCHEMA_REV = 1;
     private static final int EXPORT_SINGLE_SECONDS = 10;
     private static final int SYNAPSE_SECONDS = 1;
 
+    private static final Set<String> COMMON_COLUMN_NAME_SET = ImmutableSet.of("recordId", "appVersion", "phoneInfo",
+            "uploadDate", "healthCode", "externalId", "dataGroups", "createdOn", "createdOnTimeZone",
+            "userSharingScope");
+    private static final Set<String> SURVEY_COLUMN_NAME_SET = ImmutableSet.of(METADATA_SYNAPSE_COLUMN_NAME, "AAA",
+            "BBB.fencing", "BBB.football", "BBB.running", "BBB.swimming", "BBB.3");
+
     // Retry up to 6 times, so we don't spend more than 30 seconds per test.
-    private static final int UPLOAD_STATUS_DELAY_RETRIES = 6;
     private static final int EXPORT_RETRIES = 6;
     private static final int SYNAPSE_RETRIES = 9;
 
@@ -99,8 +113,6 @@ public class ExportTest {
     private static SqsHelper sqsHelper;
     private static SynapseClient synapseClient;
 
-    // config values
-    private static Environment env;
     private static String exporterSqsUrl;
     private static String recordIdOverrideBucket;
 
@@ -112,6 +124,7 @@ public class ExportTest {
 
     // misc
     private static ExecutorService executorService;
+    private static String integTestRunId;
     private static Table ddbExportTimeTable;
     private static Table ddbSynapseMetaTables;
     private static Table ddbSynapseTables;
@@ -123,7 +136,6 @@ public class ExportTest {
     // per-test values
     private String recordId;
     private String s3FileName;
-    private String uploadId;
 
     // We want to only set up everything once for the entire test suite, not before each individual test. This means
     // using @BeforeClass, which unfortunately prevents us from using Spring.
@@ -143,7 +155,7 @@ public class ExportTest {
         }
 
         // config vars
-        env = bridgeConfig.getEnvironment();
+        Environment env = bridgeConfig.getEnvironment();
         exporterSqsUrl = bridgeConfig.get("exporter.request.sqs.queue.url");
         recordIdOverrideBucket = bridgeConfig.get(CONFIG_KEY_RECORD_ID_OVERRIDE_BUCKET);
         String synapseUser = bridgeConfig.get(USER_NAME);
@@ -181,12 +193,34 @@ public class ExportTest {
         synapseClient.setUsername(synapseUser);
         synapseClient.setApiKey(synapseApiKey);
 
+        // ensure we have a metadata field in the study
+        StudiesApi studiesApi = developer.getClient(StudiesApi.class);
+        Study study = studiesApi.getUsersStudy().execute().body();
+        List<UploadFieldDefinition> metadataFieldDefList = study.getUploadMetadataFieldDefinitions();
+
+        // Find the metadata field.
+        boolean foundMetadataField = false;
+        for (UploadFieldDefinition oneFieldDef : metadataFieldDefList) {
+            if (METADATA_FIELD_NAME.equals(oneFieldDef.getName())) {
+                foundMetadataField = true;
+                break;
+            }
+        }
+
+        if (!foundMetadataField) {
+            // No metadata field. Create it.
+            UploadFieldDefinition metadataField = new UploadFieldDefinition().name(METADATA_FIELD_NAME)
+                    .type(UploadFieldType.STRING).maxLength(METADATA_FIELD_LENGTH);
+            study.addUploadMetadataFieldDefinitionsItem(metadataField);
+            studiesApi.updateUsersStudy(study).execute();
+        }
+
         // ensure schemas exist, so we have something to upload against
         UploadSchemasApi uploadSchemasApi = developer.getClient(UploadSchemasApi.class);
 
         UploadSchema legacySurveySchema = null;
         try {
-            legacySurveySchema = uploadSchemasApi.getMostRecentUploadSchema("legacy-survey").execute().body();
+            legacySurveySchema = uploadSchemasApi.getMostRecentUploadSchema(SCHEMA_ID).execute().body();
         } catch (EntityNotFoundException ex) {
             // no-op
         }
@@ -202,8 +236,8 @@ public class ExportTest {
             def2.setMultiChoiceAnswerList(Lists.newArrayList("fencing", "football", "running", "swimming", "3"));
 
             legacySurveySchema = new UploadSchema();
-            legacySurveySchema.setSchemaId("legacy-survey");
-            legacySurveySchema.setRevision(1L);
+            legacySurveySchema.setSchemaId(SCHEMA_ID);
+            legacySurveySchema.setRevision(SCHEMA_REV);
             legacySurveySchema.setName("Legacy (RK/AC) Survey");
             legacySurveySchema.setSchemaType(UploadSchemaType.IOS_SURVEY);
             legacySurveySchema.setFieldDefinitions(Lists.newArrayList(def1,def2));
@@ -227,17 +261,31 @@ public class ExportTest {
         startDateTime = now.minusMinutes(15);
         uploadDateTime = now.minusMinutes(10);
         endDateTime = now.minusMinutes(5);
+
+        // Generate a test run ID
+        integTestRunId = RandomStringUtils.randomAlphabetic(METADATA_FIELD_LENGTH);
+        LOG.info("integTestRunId=" + integTestRunId);
     }
 
     @BeforeMethod
     public void before() throws Exception {
-        // create and encrypt test files
-        uploadId = uploadAndVerify("legacy-survey-encrypted");
+        // Submit health data - Note that we build maps, since Jackson and GSON don't mix very well.
+        Map<String, Object> dataMap = new HashMap<>();
+        dataMap.put("AAA", "Yes");
+        dataMap.put("BBB", ImmutableSet.of("fencing", "running", 3));
+
+        Map<String, String> metadataMap = new HashMap<>();
+        metadataMap.put(METADATA_FIELD_NAME, integTestRunId);
+
+        HealthDataSubmission submission = new HealthDataSubmission().appVersion(APP_VERSION).createdOn(CREATED_ON)
+                .phoneInfo(PHONE_INFO).schemaId(SCHEMA_ID).schemaRevision(SCHEMA_REV).metadata(metadataMap)
+                .data(dataMap);
+
+        HealthDataApi healthDataApi = user.getClient(HealthDataApi.class);
+        HealthDataRecord record = healthDataApi.submitHealthData(submission).execute().body();
+        recordId = record.getId();
 
         // set uploadedOn to 10 min ago.
-        UploadValidationStatus uploadStatus = user.getClient(ForConsentedUsersApi.class).getUploadStatus(uploadId)
-                .execute().body();
-        recordId = uploadStatus.getRecord().getId();
         ddbRecordTable.updateItem("id", recordId, new AttributeUpdate("uploadedOn").put(uploadDateTime.getMillis()));
     }
 
@@ -282,7 +330,7 @@ public class ExportTest {
                 "   \"tag\":\"EX Integ Test - useLastExportTime 1\"\n" +
                 "}";
         ObjectNode requestNode = (ObjectNode) JSON_OBJECT_MAPPER.readTree(requestText);
-        executeAndValidate(requestNode, uploadId, 1);
+        executeAndValidate(requestNode, 1);
 
         // Second request with endDateTime at "now". We don't export to the same table. But the old record is there
         // from the previous export. Therefore, we expect 1 copy of that upload.
@@ -292,7 +340,7 @@ public class ExportTest {
                 "   \"tag\":\"EX Integ Test - useLastExportTime 2\"\n" +
                 "}";
         ObjectNode request2Node = (ObjectNode) JSON_OBJECT_MAPPER.readTree(request2Text);
-        executeAndValidate(request2Node, uploadId, 1);
+        executeAndValidate(request2Node, 1);
     }
 
     @Test
@@ -307,10 +355,10 @@ public class ExportTest {
                 "   \"tag\":\"EX Integ Test - start/endDateTime\"\n" +
                 "}";
         ObjectNode requestNode = (ObjectNode) JSON_OBJECT_MAPPER.readTree(requestText);
-        executeAndValidate(requestNode, uploadId, 1);
+        executeAndValidate(requestNode, 1);
 
         // Issue the same request again. Exporter honors start/endDateTime, so we export the upload again.
-        executeAndValidate(requestNode, uploadId, 2);
+        executeAndValidate(requestNode, 2);
     }
 
     @Test
@@ -328,14 +376,13 @@ public class ExportTest {
                 "   \"tag\":\"EX Integ Test - s3 override\"\n" +
                 "}";
         ObjectNode requestNode = (ObjectNode) JSON_OBJECT_MAPPER.readTree(requestText);
-        executeAndValidate(requestNode, uploadId, 1);
+        executeAndValidate(requestNode, 1);
 
         // Issue the same request again. We export the upload again.
-        executeAndValidate(requestNode, uploadId, 2);
+        executeAndValidate(requestNode, 2);
     }
 
-    private void executeAndValidate(ObjectNode requestNode, String expectedUploadId, int expectedUploadCount)
-            throws Exception {
+    private void executeAndValidate(ObjectNode requestNode, int expectedUploadCount) throws Exception {
         // enforce study whitelist, to make sure we don't export outside of the API study
         ArrayNode studyWhitelistArray = JSON_OBJECT_MAPPER.createArrayNode();
         studyWhitelistArray.add(TEST_STUDY_ID);
@@ -358,7 +405,7 @@ public class ExportTest {
             // sure that the Exporter is finished. Until that's implemented, wait about 30 seconds.
             TimeUnit.SECONDS.sleep(30);
         }
-        verifyExport(expectedUploadId, expectedUploadCount);
+        verifyExport(expectedUploadCount);
     }
 
     private void verifyExportTime(long endDateTimeEpoch) throws Exception {
@@ -383,22 +430,7 @@ public class ExportTest {
         assertEquals(lastExportDateTimeEpoch.longValue(), endDateTimeEpoch);
     }
 
-    private void verifyExport(String expectedUploadId, final int expectedUploadCount) throws Exception {
-        ForConsentedUsersApi forConsentedUsersApi = user.getClient(ForConsentedUsersApi.class);
-        UploadValidationStatus uploadStatus = null;
-
-        // spin until export status is updated
-        for (int i = 0; i < EXPORT_RETRIES; i++) {
-            uploadStatus = forConsentedUsersApi.getUploadStatus(expectedUploadId).execute().body();
-            if (uploadStatus.getRecord().getSynapseExporterStatus() == SynapseExporterStatus.SUCCEEDED) {
-                break;
-            }
-
-            LOG.info("Retry get export status times: " + i);
-            TimeUnit.SECONDS.sleep(EXPORT_SINGLE_SECONDS);
-        }
-        assertEquals(uploadStatus.getRecord().getSynapseExporterStatus(), SynapseExporterStatus.SUCCEEDED);
-
+    private void verifyExport(int expectedUploadCount) throws Exception {
         // Kick off synapse queries in table, so we can minimize idle wait.
 
         // query appVersion table
@@ -427,9 +459,11 @@ public class ExportTest {
         // Validate appVersion result.
         List<SelectColumn> appVersionHeaderList = appVersionRowSet.getHeaders();
         List<String> appVersionColumnList = appVersionRowSet.getRows().get(0).getValues();
+        Set<String> appVersionColumnNameSet = new HashSet<>();
         for (int i = 0; i < appVersionHeaderList.size(); i++) {
             String headerName = appVersionHeaderList.get(i).getName();
             String columnValue = appVersionColumnList.get(i);
+            appVersionColumnNameSet.add(headerName);
 
             if (headerName.equals("originalTable")) {
                 assertEquals(columnValue, "legacy-survey-v1");
@@ -437,16 +471,24 @@ public class ExportTest {
                 commonColumnsVerification(headerName, columnValue, recordId, uploadRecord);
             }
         }
+        assertTrue(appVersionColumnNameSet.containsAll(COMMON_COLUMN_NAME_SET));
+        assertTrue(appVersionColumnNameSet.contains("originalTable"));
 
         List<SelectColumn> surveyHeaderList = surveyRowSet.getHeaders();
         List<String> surveyColumnList = surveyRowSet.getRows().get(0).getValues();
 
-        // verify each column
+        // verify each column value
+        Set<String> surveyColumnNameSet = new HashSet<>();
         for (int i = 0; i < surveyHeaderList.size(); i++) {
             String headerName = surveyHeaderList.get(i).getName();
             String columnValue = surveyColumnList.get(i);
+            surveyColumnNameSet.add(headerName);
 
             switch (headerName) {
+                case METADATA_SYNAPSE_COLUMN_NAME: {
+                    assertEquals(columnValue, integTestRunId);
+                    break;
+                }
                 case "AAA": {
                     assertEquals(columnValue, "Yes");
                     break;
@@ -474,6 +516,8 @@ public class ExportTest {
                 default: commonColumnsVerification(headerName, columnValue, recordId, uploadRecord);
             }
         }
+        assertTrue(surveyColumnNameSet.containsAll(COMMON_COLUMN_NAME_SET));
+        assertTrue(surveyColumnNameSet.containsAll(SURVEY_COLUMN_NAME_SET));
     }
 
     private RowSet querySynapseTable(String tableId, String expectedRecordId, int expectedCount) throws Exception {
@@ -508,11 +552,11 @@ public class ExportTest {
                 break;
             }
             case "appVersion": {
-                assertEquals(columnValue, "version 1.0.0, build 1");
+                assertEquals(columnValue, APP_VERSION);
                 break;
             }
             case "phoneInfo": {
-                assertEquals(columnValue, "Integration Tests");
+                assertEquals(columnValue, PHONE_INFO);
                 break;
             }
             case "uploadDate": {
@@ -544,55 +588,7 @@ public class ExportTest {
                 break;
             }
             default:
-                LOG.info("Un-recognized column(s) added to synapse.");
+                LOG.info("Un-recognized column " + headerName + " added to synapse.");
         }
-    }
-
-    private static String uploadAndVerify(String fileLeafName) throws Exception {
-        // set up request
-        String filePath = resolveFilePath(fileLeafName);
-        File file = new File(filePath);
-
-        ForConsentedUsersApi usersApi = user.getClient(ForConsentedUsersApi.class);
-        UploadSession session = RestUtils.upload(usersApi, file);
-
-        String uploadId = session.getId();
-
-        // get validation status
-        UploadValidationStatus status = null;
-        for (int i = 0; i < UPLOAD_STATUS_DELAY_RETRIES; i++) {
-            Thread.sleep(UPLOAD_STATUS_DELAY_MILLISECONDS);
-
-            status = usersApi.getUploadStatus(session.getId()).execute().body();
-            if (status.getStatus() == UploadStatus.VALIDATION_FAILED) {
-                // Short-circuit. Validation failed. No need to retry.
-                fail("Upload validation failed, UploadId=" + uploadId);
-            } else if (status.getStatus() == UploadStatus.SUCCEEDED) {
-                break;
-            }
-        }
-
-        assertNotNull(status, "Upload status is not null, UploadId=" + uploadId);
-        assertEquals(status.getStatus(), UploadStatus.SUCCEEDED, "Upload succeeded, UploadId=" + uploadId);
-        assertTrue(status.getMessageList().isEmpty(), "Upload has no validation messages, UploadId=" + uploadId);
-
-        // Test some basic record properties.
-        HealthDataRecord record = status.getRecord();
-        assertEquals(record.getUploadId(), uploadId);
-        assertNotNull(record.getId());
-
-        // For createdOn and createdOnTimeZone, these exist in the test files, but are kind of all over the place. For
-        // now, just verify that the createdOn exists and that createdOnTimeZone can be parsed as a timezone as part of
-        // a date.
-        assertNotNull(record.getCreatedOn());
-        assertNotNull(DateTime.parse("2017-01-25T16:36" + record.getCreatedOnTimeZone()));
-
-        return uploadId;
-    }
-
-    // returns the path relative to the root of the project
-    private static String resolveFilePath(String fileLeafName) {
-        String envName = env.name().toLowerCase();
-        return "src/test/resources/upload-test/" + envName + "/" + fileLeafName;
     }
 }
