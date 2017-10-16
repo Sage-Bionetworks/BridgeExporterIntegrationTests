@@ -30,6 +30,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import org.apache.commons.lang.StringUtils;
@@ -85,6 +86,8 @@ public class ExportTest {
     private static final String CREATED_ON_STR = "2015-04-02T03:27:09-07:00";
     private static final DateTime CREATED_ON = DateTime.parse(CREATED_ON_STR);
     private static final String CREATED_ON_TIME_ZONE = "-0700";
+    private static final String LARGE_TEXT_ATTACHMENT_SCHEMA_ID = "large-text-attachment-test";
+    private static final long LARGE_TEXT_ATTACHMENT_SCHEMA_REV = 1;
     private static final String METADATA_FIELD_NAME = "integTestRunId";
     private static final int METADATA_FIELD_LENGTH = 4;
     private static final String METADATA_SYNAPSE_COLUMN_NAME = "metadata." + METADATA_FIELD_NAME;
@@ -97,8 +100,9 @@ public class ExportTest {
     private static final Set<String> COMMON_COLUMN_NAME_SET = ImmutableSet.of("recordId", "appVersion", "phoneInfo",
             "uploadDate", "healthCode", "externalId", "dataGroups", "createdOn", "createdOnTimeZone",
             "userSharingScope");
-    private static final Set<String> SURVEY_COLUMN_NAME_SET = ImmutableSet.of(METADATA_SYNAPSE_COLUMN_NAME, "AAA",
-            "BBB.fencing", "BBB.football", "BBB.running", "BBB.swimming", "BBB.3");
+    private static final Map<String, String> LEGACY_SURVEY_HEALTH_DATA_MAP = ImmutableMap.<String, String>builder()
+            .put("AAA", "Yes").put("BBB.fencing", "true").put("BBB.football", "false").put("BBB.running", "true")
+            .put("BBB.swimming", "false").put("BBB.3", "true").build();
 
     // Retry up to 6 times, so we don't spend more than 30 seconds per test.
     private static final int EXPORT_RETRIES = 6;
@@ -218,6 +222,7 @@ public class ExportTest {
         // ensure schemas exist, so we have something to upload against
         UploadSchemasApi uploadSchemasApi = developer.getClient(UploadSchemasApi.class);
 
+        // legacy-survey schema, for integ tests
         UploadSchema legacySurveySchema = null;
         try {
             legacySurveySchema = uploadSchemasApi.getMostRecentUploadSchema(SCHEMA_ID).execute().body();
@@ -244,6 +249,23 @@ public class ExportTest {
             uploadSchemasApi.createUploadSchema(legacySurveySchema).execute();
         }
 
+        // large-text-attachment-test schema
+        UploadSchema largeTextAttachmentTestSchema = null;
+        try {
+            largeTextAttachmentTestSchema = uploadSchemasApi.getMostRecentUploadSchema(LARGE_TEXT_ATTACHMENT_SCHEMA_ID)
+                    .execute().body();
+        } catch (EntityNotFoundException ex) {
+            // no-op
+        }
+        if (largeTextAttachmentTestSchema == null) {
+            UploadFieldDefinition largeTextFieldDef = new UploadFieldDefinition().name("my-large-text-attachment")
+                    .type(UploadFieldType.LARGE_TEXT_ATTACHMENT);
+            largeTextAttachmentTestSchema = new UploadSchema().schemaId(LARGE_TEXT_ATTACHMENT_SCHEMA_ID)
+                    .revision(LARGE_TEXT_ATTACHMENT_SCHEMA_REV).name("Large Text Attachment Test")
+                    .schemaType(UploadSchemaType.IOS_DATA).addFieldDefinitionsItem(largeTextFieldDef);
+            uploadSchemasApi.createUploadSchema(largeTextAttachmentTestSchema).execute();
+        }
+
         // make the user account sharing upload to enable export
         ForConsentedUsersApi usersApi = user.getClient(ForConsentedUsersApi.class);
         StudyParticipant userParticipant = usersApi.getUsersParticipantRecord().execute().body();
@@ -268,25 +290,10 @@ public class ExportTest {
     }
 
     @BeforeMethod
-    public void before() throws Exception {
-        // Submit health data - Note that we build maps, since Jackson and GSON don't mix very well.
-        Map<String, Object> dataMap = new HashMap<>();
-        dataMap.put("AAA", "Yes");
-        dataMap.put("BBB", ImmutableSet.of("fencing", "running", 3));
-
-        Map<String, String> metadataMap = new HashMap<>();
-        metadataMap.put(METADATA_FIELD_NAME, integTestRunId);
-
-        HealthDataSubmission submission = new HealthDataSubmission().appVersion(APP_VERSION).createdOn(CREATED_ON)
-                .phoneInfo(PHONE_INFO).schemaId(SCHEMA_ID).schemaRevision(SCHEMA_REV).metadata(metadataMap)
-                .data(dataMap);
-
-        HealthDataApi healthDataApi = user.getClient(HealthDataApi.class);
-        HealthDataRecord record = healthDataApi.submitHealthData(submission).execute().body();
-        recordId = record.getId();
-
-        // set uploadedOn to 10 min ago.
-        ddbRecordTable.updateItem("id", recordId, new AttributeUpdate("uploadedOn").put(uploadDateTime.getMillis()));
+    public void before() {
+        // Reset recordId and s3Filename before each test (since it's not clear TestNG does).
+        recordId = null;
+        s3FileName = null;
     }
 
     @AfterMethod
@@ -315,8 +322,30 @@ public class ExportTest {
         }
     }
 
+    private void setupLegacySurveyTest() throws Exception {
+        // Submit health data - Note that we build maps, since Jackson and GSON don't mix very well.
+        Map<String, Object> dataMap = new HashMap<>();
+        dataMap.put("AAA", "Yes");
+        dataMap.put("BBB", ImmutableSet.of("fencing", "running", 3));
+
+        Map<String, String> metadataMap = new HashMap<>();
+        metadataMap.put(METADATA_FIELD_NAME, integTestRunId);
+
+        HealthDataSubmission submission = new HealthDataSubmission().appVersion(APP_VERSION).createdOn(CREATED_ON)
+                .phoneInfo(PHONE_INFO).schemaId(SCHEMA_ID).schemaRevision(SCHEMA_REV).metadata(metadataMap)
+                .data(dataMap);
+
+        HealthDataApi healthDataApi = user.getClient(HealthDataApi.class);
+        HealthDataRecord record = healthDataApi.submitHealthData(submission).execute().body();
+        recordId = record.getId();
+
+        // set uploadedOn to 10 min ago.
+        ddbRecordTable.updateItem("id", recordId, new AttributeUpdate("uploadedOn").put(uploadDateTime.getMillis()));
+    }
+
     @Test
     public void useLastExportTime() throws Exception {
+        setupLegacySurveyTest();
         LOG.info("Starting useLastExportTime() for record " + recordId);
 
         // set exportTime to 15 min ago
@@ -330,7 +359,7 @@ public class ExportTest {
                 "   \"tag\":\"EX Integ Test - useLastExportTime 1\"\n" +
                 "}";
         ObjectNode requestNode = (ObjectNode) JSON_OBJECT_MAPPER.readTree(requestText);
-        executeAndValidate(requestNode, 1);
+        executeAndValidate(requestNode, 1, SCHEMA_ID, SCHEMA_REV, LEGACY_SURVEY_HEALTH_DATA_MAP);
 
         // Second request with endDateTime at "now". We don't export to the same table. But the old record is there
         // from the previous export. Therefore, we expect 1 copy of that upload.
@@ -340,11 +369,12 @@ public class ExportTest {
                 "   \"tag\":\"EX Integ Test - useLastExportTime 2\"\n" +
                 "}";
         ObjectNode request2Node = (ObjectNode) JSON_OBJECT_MAPPER.readTree(request2Text);
-        executeAndValidate(request2Node, 1);
+        executeAndValidate(request2Node, 1, SCHEMA_ID, SCHEMA_REV, LEGACY_SURVEY_HEALTH_DATA_MAP);
     }
 
     @Test
     public void startAndEndDateTime() throws Exception {
+        setupLegacySurveyTest();
         LOG.info("Starting startAndEndDateTime() for record " + recordId);
 
         // create request - startDateTime is 15 minutes ago, endDateTime is 5 minutes ago
@@ -355,14 +385,15 @@ public class ExportTest {
                 "   \"tag\":\"EX Integ Test - start/endDateTime\"\n" +
                 "}";
         ObjectNode requestNode = (ObjectNode) JSON_OBJECT_MAPPER.readTree(requestText);
-        executeAndValidate(requestNode, 1);
+        executeAndValidate(requestNode, 1, SCHEMA_ID, SCHEMA_REV, LEGACY_SURVEY_HEALTH_DATA_MAP);
 
         // Issue the same request again. Exporter honors start/endDateTime, so we export the upload again.
-        executeAndValidate(requestNode, 2);
+        executeAndValidate(requestNode, 2, SCHEMA_ID, SCHEMA_REV, LEGACY_SURVEY_HEALTH_DATA_MAP);
     }
 
     @Test
     public void s3Override() throws Exception {
+        setupLegacySurveyTest();
         LOG.info("Starting s3Override() for record " + recordId);
 
         // upload the override file to S3
@@ -376,13 +407,54 @@ public class ExportTest {
                 "   \"tag\":\"EX Integ Test - s3 override\"\n" +
                 "}";
         ObjectNode requestNode = (ObjectNode) JSON_OBJECT_MAPPER.readTree(requestText);
-        executeAndValidate(requestNode, 1);
+        executeAndValidate(requestNode, 1, SCHEMA_ID, SCHEMA_REV, LEGACY_SURVEY_HEALTH_DATA_MAP);
 
         // Issue the same request again. We export the upload again.
-        executeAndValidate(requestNode, 2);
+        executeAndValidate(requestNode, 2, SCHEMA_ID, SCHEMA_REV, LEGACY_SURVEY_HEALTH_DATA_MAP);
     }
 
-    private void executeAndValidate(ObjectNode requestNode, int expectedUploadCount) throws Exception {
+    @Test
+    public void largeTextAttachment() throws Exception {
+        // Submit health data - Note that we build maps, since Jackson and GSON don't mix very well.
+        Map<String, String> dataMap = new HashMap<>();
+        dataMap.put("my-large-text-attachment", "This is my large text attachment");
+
+        Map<String, String> metadataMap = new HashMap<>();
+        metadataMap.put(METADATA_FIELD_NAME, integTestRunId);
+
+        HealthDataSubmission submission = new HealthDataSubmission().appVersion(APP_VERSION).createdOn(CREATED_ON)
+                .phoneInfo(PHONE_INFO).schemaId(LARGE_TEXT_ATTACHMENT_SCHEMA_ID)
+                .schemaRevision(LARGE_TEXT_ATTACHMENT_SCHEMA_REV).metadata(metadataMap).data(dataMap);
+
+        HealthDataApi healthDataApi = user.getClient(HealthDataApi.class);
+        HealthDataRecord record = healthDataApi.submitHealthData(submission).execute().body();
+        recordId = record.getId();
+        LOG.info("Starting largeTextAttachment() for record " + recordId);
+
+        // set uploadedOn to 10 min ago.
+        ddbRecordTable.updateItem("id", recordId, new AttributeUpdate("uploadedOn").put(uploadDateTime.getMillis()));
+
+        // create request - startDateTime is 15 minutes ago, endDateTime is 5 minutes ago
+        String requestText = "{\n" +
+                "   \"startDateTime\":\"" + startDateTime.toString() + "\",\n" +
+                "   \"endDateTime\":\"" + endDateTime.toString() + "\",\n" +
+                "   \"useLastExportTime\":false,\n" +
+                "   \"tag\":\"EX Integ Test - Large Text Attachments\"\n" +
+                "}";
+        ObjectNode requestNode = (ObjectNode) JSON_OBJECT_MAPPER.readTree(requestText);
+
+        // Make expected output. Note that the string is quoted, because JSON attachments are always written as JSON.
+        // For strings, this means with quotes. Most of the time, this will be a non-issue, since most JSON attachments
+        // are objects or arrays.
+        Map<String, String> expectedOutputMap = new HashMap<>();
+        expectedOutputMap.put("my-large-text-attachment", "\"This is my large text attachment\"");
+
+        executeAndValidate(requestNode, 1, LARGE_TEXT_ATTACHMENT_SCHEMA_ID, LARGE_TEXT_ATTACHMENT_SCHEMA_REV,
+                expectedOutputMap);
+    }
+
+    private void executeAndValidate(ObjectNode requestNode, int expectedUploadCount, String expectedSchemaId,
+            long expectedSchemaRev, Map<String, String> expectedHealthDataMap) throws Exception {
         // enforce study whitelist, to make sure we don't export outside of the API study
         ArrayNode studyWhitelistArray = JSON_OBJECT_MAPPER.createArrayNode();
         studyWhitelistArray.add(TEST_STUDY_ID);
@@ -405,7 +477,7 @@ public class ExportTest {
             // sure that the Exporter is finished. Until that's implemented, wait about 30 seconds.
             TimeUnit.SECONDS.sleep(30);
         }
-        verifyExport(expectedUploadCount);
+        verifyExport(expectedUploadCount, expectedSchemaId, expectedSchemaRev, expectedHealthDataMap);
     }
 
     private void verifyExportTime(long endDateTimeEpoch) throws Exception {
@@ -430,7 +502,8 @@ public class ExportTest {
         assertEquals(lastExportDateTimeEpoch.longValue(), endDateTimeEpoch);
     }
 
-    private void verifyExport(int expectedUploadCount) throws Exception {
+    private void verifyExport(int expectedUploadCount, String expectedSchemaId, long expectedSchemaRev,
+            Map<String, String> expectedHealthDataMap) throws Exception {
         // Kick off synapse queries in table, so we can minimize idle wait.
 
         // query appVersion table
@@ -441,7 +514,8 @@ public class ExportTest {
                 expectedUploadCount));
 
         // query survey result table
-        Item surveyItem = ddbSynapseTables.getItem("schemaKey", TEST_STUDY_ID + "-legacy-survey-v1");
+        String expectedSchemaKey = expectedSchemaId + "-v" + expectedSchemaRev;
+        Item surveyItem = ddbSynapseTables.getItem("schemaKey", TEST_STUDY_ID + "-" + expectedSchemaKey);
         final String surveyTableId = surveyItem.getString("tableId");
         assertFalse(StringUtils.isBlank(surveyTableId));
         Future<RowSet> surveyFuture = executorService.submit(() -> querySynapseTable(surveyTableId, recordId,
@@ -466,7 +540,7 @@ public class ExportTest {
             appVersionColumnNameSet.add(headerName);
 
             if (headerName.equals("originalTable")) {
-                assertEquals(columnValue, "legacy-survey-v1");
+                assertEquals(columnValue, expectedSchemaKey);
             } else {
                 commonColumnsVerification(headerName, columnValue, recordId, uploadRecord);
             }
@@ -484,40 +558,17 @@ public class ExportTest {
             String columnValue = surveyColumnList.get(i);
             surveyColumnNameSet.add(headerName);
 
-            switch (headerName) {
-                case METADATA_SYNAPSE_COLUMN_NAME: {
-                    assertEquals(columnValue, integTestRunId);
-                    break;
-                }
-                case "AAA": {
-                    assertEquals(columnValue, "Yes");
-                    break;
-                }
-                case "BBB.fencing": {
-                    assertEquals(columnValue, "true");
-                    break;
-                }
-                case "BBB.football": {
-                    assertEquals(columnValue, "false");
-                    break;
-                }
-                case "BBB.running": {
-                    assertEquals(columnValue, "true");
-                    break;
-                }
-                case "BBB.swimming": {
-                    assertEquals(columnValue, "false");
-                    break;
-                }
-                case "BBB.3": {
-                    assertEquals(columnValue, "true");
-                    break;
-                }
-                default: commonColumnsVerification(headerName, columnValue, recordId, uploadRecord);
+            if (METADATA_SYNAPSE_COLUMN_NAME.equals(headerName)) {
+                assertEquals(columnValue, integTestRunId);
+            } else if (expectedHealthDataMap.containsKey(headerName)) {
+                assertEquals(columnValue, expectedHealthDataMap.get(headerName));
+            } else {
+                commonColumnsVerification(headerName, columnValue, recordId, uploadRecord);
             }
         }
         assertTrue(surveyColumnNameSet.containsAll(COMMON_COLUMN_NAME_SET));
-        assertTrue(surveyColumnNameSet.containsAll(SURVEY_COLUMN_NAME_SET));
+        assertTrue(surveyColumnNameSet.containsAll(expectedHealthDataMap.keySet()));
+        assertTrue(surveyColumnNameSet.contains(METADATA_SYNAPSE_COLUMN_NAME));
     }
 
     private RowSet querySynapseTable(String tableId, String expectedRecordId, int expectedCount) throws Exception {
