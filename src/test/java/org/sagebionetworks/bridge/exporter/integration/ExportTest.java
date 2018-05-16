@@ -95,7 +95,7 @@ public class ExportTest {
     private static final String SCHEMA_ID = "legacy-survey";
     private static final long SCHEMA_REV = 1;
     private static final int EXPORT_SINGLE_SECONDS = 10;
-    private static final int SYNAPSE_SECONDS = 1;
+    private static final int SYNAPSE_SECONDS = 2;
 
     private static final Set<String> COMMON_COLUMN_NAME_SET = ImmutableSet.of("recordId", "appVersion", "phoneInfo",
             "uploadDate", "healthCode", "externalId", "dataGroups", "createdOn", "createdOnTimeZone",
@@ -475,7 +475,7 @@ public class ExportTest {
             // todo Wait for the Exporter to finish.
             // Until https://sagebionetworks.jira.com/browse/BRIDGE-1826 is implemented, we have no way of knowing for
             // sure that the Exporter is finished. Until that's implemented, wait about 30 seconds.
-            TimeUnit.SECONDS.sleep(30);
+            TimeUnit.SECONDS.sleep(45);
         }
         verifyExport(expectedUploadCount, expectedSchemaId, expectedSchemaRev, expectedHealthDataMap);
     }
