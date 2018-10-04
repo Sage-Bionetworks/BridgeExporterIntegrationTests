@@ -40,6 +40,8 @@ import org.joda.time.DateTime;
 import org.sagebionetworks.client.SynapseClient;
 import org.sagebionetworks.client.SynapseClientImpl;
 import org.sagebionetworks.client.exceptions.SynapseResultNotReadyException;
+import org.sagebionetworks.repo.model.file.FileHandleAssociateType;
+import org.sagebionetworks.repo.model.file.FileHandleAssociation;
 import org.sagebionetworks.repo.model.table.QueryResultBundle;
 import org.sagebionetworks.repo.model.table.RowSet;
 import org.sagebionetworks.repo.model.table.SelectColumn;
@@ -579,9 +581,17 @@ public class ExportTest {
             } else if (expectedHealthDataMap.containsKey(headerName)) {
                 assertEquals(columnValue, expectedHealthDataMap.get(headerName));
             } else if (headerName.equals(RAW_DATA_COLUMN_NAME)) {
+                // We need to use a file handle association to ensure we have permissions to get the file handle.
+                FileHandleAssociation fileHandleAssociation = new FileHandleAssociation();
+                fileHandleAssociation.setAssociateObjectId(surveyTableId);
+                fileHandleAssociation.setAssociateObjectType(FileHandleAssociateType.TableEntity);
+                fileHandleAssociation.setFileHandleId(columnValue);
+
                 String rawDataFilename = recordId + "-" + RandomStringUtils.randomAlphabetic(4) + "-raw.json";
                 File rawDataFile = new File(tmpDir, rawDataFilename);
-                synapseClient.downloadFromFileHandleTemporaryUrl(columnValue, rawDataFile);
+
+                synapseClient.downloadFile(fileHandleAssociation, rawDataFile);
+
                 Map<String, Object> rawDataMap = DefaultObjectMapper.INSTANCE.readValue(rawDataFile,
                         DefaultObjectMapper.TYPE_REF_RAW_MAP);
                 assertEquals(rawDataMap, submittedHealthDataMap);
