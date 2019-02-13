@@ -66,6 +66,7 @@ import org.sagebionetworks.bridge.rest.model.HealthDataRecord;
 import org.sagebionetworks.bridge.rest.model.HealthDataSubmission;
 import org.sagebionetworks.bridge.rest.model.Role;
 import org.sagebionetworks.bridge.rest.model.SharingScope;
+import org.sagebionetworks.bridge.rest.model.SignUp;
 import org.sagebionetworks.bridge.rest.model.Study;
 import org.sagebionetworks.bridge.rest.model.StudyParticipant;
 import org.sagebionetworks.bridge.rest.model.UploadFieldDefinition;
@@ -109,7 +110,7 @@ public class ExportTest {
 
     private static final Set<String> COMMON_COLUMN_NAME_SET = ImmutableSet.of("recordId", "appVersion", "phoneInfo",
             "uploadDate", "healthCode", "externalId", "dataGroups", "createdOn", "createdOnTimeZone",
-            "userSharingScope");
+            "userSharingScope", "substudyMemberships");
     private static final Map<String, String> LEGACY_SURVEY_EXPECTED_HEALTH_DATA_MAP = ImmutableMap.<String, String>builder()
             .put("AAA", "Yes").put("BBB.fencing", "true").put("BBB.football", "false").put("BBB.running", "true")
             .put("BBB.swimming", "false").put("BBB.3", "true").build();
@@ -657,6 +658,10 @@ public class ExportTest {
                 break;
             }
             case "dataGroups": {
+                assertTrue(StringUtils.isBlank(columnValue));
+                break;
+            }
+            case "substudyMemberships": {
                 assertTrue(StringUtils.isBlank(columnValue));
                 break;
             }
