@@ -1,4 +1,4 @@
-package org.sagebionetworks.bridge.exporter.integration;
+    package org.sagebionetworks.bridge.exporter.integration;
 
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
@@ -60,6 +60,7 @@ import org.sagebionetworks.bridge.json.DefaultObjectMapper;
 import org.sagebionetworks.bridge.rest.api.ForConsentedUsersApi;
 import org.sagebionetworks.bridge.rest.api.HealthDataApi;
 import org.sagebionetworks.bridge.rest.api.StudiesApi;
+import org.sagebionetworks.bridge.rest.api.SubstudiesApi;
 import org.sagebionetworks.bridge.rest.api.UploadSchemasApi;
 import org.sagebionetworks.bridge.rest.exceptions.EntityNotFoundException;
 import org.sagebionetworks.bridge.rest.model.HealthDataRecord;
@@ -69,10 +70,12 @@ import org.sagebionetworks.bridge.rest.model.SharingScope;
 import org.sagebionetworks.bridge.rest.model.SignUp;
 import org.sagebionetworks.bridge.rest.model.Study;
 import org.sagebionetworks.bridge.rest.model.StudyParticipant;
+import org.sagebionetworks.bridge.rest.model.Substudy;
 import org.sagebionetworks.bridge.rest.model.UploadFieldDefinition;
 import org.sagebionetworks.bridge.rest.model.UploadFieldType;
 import org.sagebionetworks.bridge.rest.model.UploadSchema;
 import org.sagebionetworks.bridge.rest.model.UploadSchemaType;
+import org.sagebionetworks.bridge.rest.model.VersionHolder;
 import org.sagebionetworks.bridge.s3.S3Helper;
 import org.sagebionetworks.bridge.sqs.SqsHelper;
 
@@ -149,6 +152,9 @@ public class ExportTest {
     private static TestUserHelper.TestUser developer;
     private static TestUserHelper.TestUser user;
 
+    private static String dataGroup;
+    private static String substudyId;
+    
     // per-test values
     private String recordId;
     private String s3FileName;
@@ -202,7 +208,36 @@ public class ExportTest {
         // Bridge clients
         admin = TestUserHelper.getSignedInAdmin();
         developer = TestUserHelper.createAndSignInUser(ExportTest.class, TEST_STUDY_ID, false, Role.DEVELOPER);
-        user = TestUserHelper.createAndSignInUser(ExportTest.class, TEST_STUDY_ID, true);
+
+        // Study
+        StudiesApi studiesApi = developer.getClient(StudiesApi.class);
+        Study study = studiesApi.getUsersStudy().execute().body();
+        if (study.getDataGroups().isEmpty()) {
+            dataGroup = "group1";
+            study.setDataGroups(ImmutableList.of(dataGroup));
+            VersionHolder version = studiesApi.updateUsersStudy(study).execute().body();
+            study.setVersion(version.getVersion());
+        } else {
+            dataGroup = study.getDataGroups().get(0);            
+        }
+        
+        // Substudy
+        SubstudiesApi substudiesApi = admin.getClient(SubstudiesApi.class);
+        List<Substudy> substudies = substudiesApi.getSubstudies(false).execute().body().getItems();
+        if (substudies.isEmpty()) {
+            substudyId = "substudyA";
+            Substudy substudy = new Substudy().id(substudyId).name("Substudy " + substudyId);
+            substudiesApi.createSubstudy(substudy).execute();
+        } else {
+            substudyId = substudies.get(0).getId();    
+        }
+
+        String userEmail = TestUserHelper.makeEmail(ExportTest.class);
+        SignUp signUp = new SignUp().email(userEmail).password("P@ssword`1").study(TEST_STUDY_ID);
+        signUp.dataGroups(ImmutableList.of(dataGroup));
+        signUp.substudyIds(ImmutableList.of(substudyId));
+        user = new TestUserHelper.Builder(ExportTest.class).withSignUp(signUp).withConsentUser(true)
+                .createAndSignInUser(TEST_STUDY_ID);
 
         // Synapse clients
         synapseClient = new SynapseClientImpl();
@@ -210,8 +245,6 @@ public class ExportTest {
         synapseClient.setApiKey(synapseApiKey);
 
         // ensure we have a metadata field in the study
-        StudiesApi studiesApi = developer.getClient(StudiesApi.class);
-        Study study = studiesApi.getUsersStudy().execute().body();
         List<UploadFieldDefinition> metadataFieldDefList = study.getUploadMetadataFieldDefinitions();
 
         // Find the metadata field.
@@ -658,11 +691,11 @@ public class ExportTest {
                 break;
             }
             case "dataGroups": {
-                assertTrue(StringUtils.isBlank(columnValue));
+                assertEquals(columnValue, dataGroup);
                 break;
             }
             case "substudyMemberships": {
-                assertTrue(StringUtils.isBlank(columnValue));
+                assertEquals(columnValue, String.format("|%s=|", substudyId));
                 break;
             }
             case "createdOn": {

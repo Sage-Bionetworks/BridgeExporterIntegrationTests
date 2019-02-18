@@ -83,6 +83,9 @@ public class TestUserHelper {
         public Config getConfig() {
             return manager.getConfig();
         }
+        public UserSessionInfo getUserSession() {
+            return userSession;
+        }
     }
 
     public static TestUser getSignedInAdmin() {
@@ -114,6 +117,11 @@ public class TestUserHelper {
 
         public Builder withRoles(Role...roles) {
             Collections.addAll(this.roles, roles);
+            return this;
+        }
+        
+        public Builder withSignUp(SignUp signUp) {
+            this.signUp = signUp;
             return this;
         }
         
