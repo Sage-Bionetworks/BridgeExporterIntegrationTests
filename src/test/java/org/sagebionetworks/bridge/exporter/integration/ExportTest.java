@@ -396,7 +396,6 @@ public class ExportTest {
     }
 
     @Test
-    @Ignore
     public void useLastExportTime() throws Exception {
         setupLegacySurveyTest();
         LOG.info("Starting useLastExportTime() for record " + recordId);
