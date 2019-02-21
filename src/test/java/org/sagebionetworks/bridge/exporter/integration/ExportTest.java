@@ -229,9 +229,7 @@ public class ExportTest {
         SubstudiesApi substudiesApi = admin.getClient(SubstudiesApi.class);
         
         // This should sign in the admin...
-        System.out.println("BEFORE: " + admin.getUserSession().isAuthenticated());
         List<Substudy> substudies = substudiesApi.getSubstudies(false).execute().body().getItems();
-        System.out.println("AFTER: " + admin.getUserSession().isAuthenticated());
         if (substudies.isEmpty()) {
             substudyId = "substudyA";
             Substudy substudy = new Substudy().id(substudyId).name("Substudy " + substudyId);
