@@ -1,4 +1,4 @@
-    package org.sagebionetworks.bridge.exporter.integration;
+package org.sagebionetworks.bridge.exporter.integration;
 
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
@@ -45,6 +45,7 @@ import org.sagebionetworks.repo.model.file.FileHandleAssociation;
 import org.sagebionetworks.repo.model.table.QueryResultBundle;
 import org.sagebionetworks.repo.model.table.RowSet;
 import org.sagebionetworks.repo.model.table.SelectColumn;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testng.annotations.AfterClass;
@@ -62,6 +63,7 @@ import org.sagebionetworks.bridge.rest.api.HealthDataApi;
 import org.sagebionetworks.bridge.rest.api.StudiesApi;
 import org.sagebionetworks.bridge.rest.api.SubstudiesApi;
 import org.sagebionetworks.bridge.rest.api.UploadSchemasApi;
+import org.sagebionetworks.bridge.rest.exceptions.BadRequestException;
 import org.sagebionetworks.bridge.rest.exceptions.EntityNotFoundException;
 import org.sagebionetworks.bridge.rest.model.HealthDataRecord;
 import org.sagebionetworks.bridge.rest.model.HealthDataSubmission;
@@ -223,6 +225,8 @@ public class ExportTest {
         
         // Substudy
         SubstudiesApi substudiesApi = admin.getClient(SubstudiesApi.class);
+        
+        // This should sign in the admin...
         List<Substudy> substudies = substudiesApi.getSubstudies(false).execute().body().getItems();
         if (substudies.isEmpty()) {
             substudyId = "substudyA";
@@ -364,9 +368,11 @@ public class ExportTest {
         if (user != null) {
             user.signOutAndDeleteUser();
         }
-
         if (admin != null) {
-            admin.signOut();
+            try {
+                admin.signOut();    
+            } catch(BadRequestException e) {
+            }
         }
     }
 
