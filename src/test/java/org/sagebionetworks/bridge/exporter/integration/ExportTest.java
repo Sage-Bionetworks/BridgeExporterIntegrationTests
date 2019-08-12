@@ -119,7 +119,7 @@ public class ExportTest {
 
     private static final Set<String> COMMON_COLUMN_NAME_SET = ImmutableSet.of("recordId", "appVersion", "phoneInfo",
             "uploadDate", "healthCode", "externalId", "dataGroups", "createdOn", "createdOnTimeZone",
-            "userSharingScope", "substudyMemberships");
+            "userSharingScope", "substudyMemberships", "dayInStudy");
     private static final Map<String, String> LEGACY_SURVEY_EXPECTED_HEALTH_DATA_MAP = ImmutableMap.<String, String>builder()
             .put("AAA", "Yes").put("BBB.fencing", "true").put("BBB.football", "false").put("BBB.running", "true")
             .put("BBB.swimming", "false").put("BBB.3", "true").build();
@@ -246,6 +246,11 @@ public class ExportTest {
         signUp.substudyIds(ImmutableList.of(substudyId));
         user = new TestUserHelper.Builder(ExportTest.class).withSignUp(signUp).withConsentUser(true)
                 .createAndSignInUser(TEST_STUDY_ID);
+
+        // Initialize user by asking for activities. This sets the activities_retrieved event, so we can calculate
+        // dayInStudy.
+        user.getClient(ForConsentedUsersApi.class).getScheduledActivitiesByDateRange(DateTime.now(),
+                DateTime.now().plusDays(1)).execute();
 
         // Synapse clients
         synapseClient = new SynapseClientImpl();
@@ -776,6 +781,11 @@ public class ExportTest {
             }
             case "userSharingScope": {
                 assertEquals(columnValue, uploadRecord.get("userSharingScope"));
+                break;
+            }
+            case "dayInStudy": {
+                // Since the user was just created, this is always 1.
+                assertEquals(columnValue, "1");
                 break;
             }
             default:
