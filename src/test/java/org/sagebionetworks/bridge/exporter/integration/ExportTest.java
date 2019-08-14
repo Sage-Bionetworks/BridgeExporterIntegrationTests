@@ -600,8 +600,8 @@ public class ExportTest {
         } else {
             // todo Wait for the Exporter to finish.
             // Until https://sagebionetworks.jira.com/browse/BRIDGE-1826 is implemented, we have no way of knowing for
-            // sure that the Exporter is finished. Until that's implemented, wait about 30 seconds.
-            TimeUnit.SECONDS.sleep(45);
+            // sure that the Exporter is finished. Until that's implemented, wait about 60 seconds.
+            TimeUnit.SECONDS.sleep(60);
         }
         verifyExport(expectedUploadCount, expectedOriginalTable, dataTableIdProvider, submittedHealthDataMap,
                 expectedHealthDataMap);
