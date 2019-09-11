@@ -83,9 +83,14 @@
             <version>19.0</version>
         </dependency>
         <dependency>
+            <groupId>org.sagebionetworks</groupId>
+            <artifactId>BridgeIntegTestUtils</artifactId>
+            <version>1.0.6</version>
+        </dependency>
+        <dependency>
             <groupId>org.sagebionetworks.bridge</groupId>
             <artifactId>rest-client</artifactId>
-            <version>0.16.31</version>
+            <version>0.19.11</version>
             <scope>test</scope>
         </dependency>
         <dependency>

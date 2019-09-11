@@ -81,6 +81,8 @@ import org.sagebionetworks.bridge.rest.model.UploadSchemaType;
 import org.sagebionetworks.bridge.rest.model.VersionHolder;
 import org.sagebionetworks.bridge.s3.S3Helper;
 import org.sagebionetworks.bridge.sqs.SqsHelper;
+import org.sagebionetworks.bridge.user.TestUserHelper;
+import org.sagebionetworks.bridge.util.IntegTestUtils;
 
 @SuppressWarnings({ "deprecation", "ResultOfMethodCallIgnored" })
 public class ExportTest {
@@ -213,7 +215,7 @@ public class ExportTest {
 
         // Bridge clients
         admin = TestUserHelper.getSignedInAdmin();
-        developer = TestUserHelper.createAndSignInUser(ExportTest.class, TEST_STUDY_ID, false, Role.DEVELOPER);
+        developer = TestUserHelper.createAndSignInUser(ExportTest.class, false, Role.DEVELOPER);
 
         // Study
         StudiesApi studiesApi = developer.getClient(StudiesApi.class);
@@ -240,12 +242,12 @@ public class ExportTest {
             substudyId = substudies.get(0).getId();    
         }
 
-        String userEmail = TestUserHelper.makeEmail(ExportTest.class);
+        String userEmail = IntegTestUtils.makeEmail(ExportTest.class);
         SignUp signUp = new SignUp().email(userEmail).password("P@ssword`1").study(TEST_STUDY_ID);
         signUp.dataGroups(ImmutableList.of(dataGroup));
         signUp.substudyIds(ImmutableList.of(substudyId));
         user = new TestUserHelper.Builder(ExportTest.class).withSignUp(signUp).withConsentUser(true)
-                .createAndSignInUser(TEST_STUDY_ID);
+                .createAndSignInUser();
 
         // Initialize user by asking for activities. This sets the activities_retrieved event, so we can calculate
         // dayInStudy.
@@ -326,7 +328,7 @@ public class ExportTest {
 
         // make the user account sharing upload to enable export
         ForConsentedUsersApi usersApi = user.getClient(ForConsentedUsersApi.class);
-        StudyParticipant userParticipant = usersApi.getUsersParticipantRecord().execute().body();
+        StudyParticipant userParticipant = usersApi.getUsersParticipantRecord(false).execute().body();
         userParticipant.sharingScope(SharingScope.ALL_QUALIFIED_RESEARCHERS);
         usersApi.updateUsersParticipantRecord(userParticipant).execute().body();
 
