@@ -113,7 +113,7 @@ public class ExportTest {
     private static final String METADATA_SYNAPSE_COLUMN_NAME = "metadata." + METADATA_FIELD_NAME;
     private static final String PHONE_INFO = "BridgeEXIntegTest";
     private static final String RAW_DATA_COLUMN_NAME = "rawData";
-    private static final String SCHEMA_ID = "legacy-survey";
+    private static final String SCHEMA_ID = "legacy-survey+with-special-chars";
     private static final long SCHEMA_REV = 1;
     private static final String SCHEMA_TABLE_NAME = SCHEMA_ID + "-v" + SCHEMA_REV;
     private static final int EXPORT_SINGLE_SECONDS = 10;
