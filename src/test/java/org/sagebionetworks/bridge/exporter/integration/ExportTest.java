@@ -59,13 +59,14 @@ import org.sagebionetworks.bridge.config.Config;
 import org.sagebionetworks.bridge.config.Environment;
 import org.sagebionetworks.bridge.config.PropertiesConfig;
 import org.sagebionetworks.bridge.json.DefaultObjectMapper;
+import org.sagebionetworks.bridge.rest.api.AppsApi;
 import org.sagebionetworks.bridge.rest.api.ForConsentedUsersApi;
 import org.sagebionetworks.bridge.rest.api.HealthDataApi;
 import org.sagebionetworks.bridge.rest.api.StudiesApi;
-import org.sagebionetworks.bridge.rest.api.SubstudiesApi;
 import org.sagebionetworks.bridge.rest.api.UploadSchemasApi;
 import org.sagebionetworks.bridge.rest.exceptions.BadRequestException;
 import org.sagebionetworks.bridge.rest.exceptions.EntityNotFoundException;
+import org.sagebionetworks.bridge.rest.model.App;
 import org.sagebionetworks.bridge.rest.model.HealthDataRecord;
 import org.sagebionetworks.bridge.rest.model.HealthDataSubmission;
 import org.sagebionetworks.bridge.rest.model.Role;
@@ -73,7 +74,6 @@ import org.sagebionetworks.bridge.rest.model.SharingScope;
 import org.sagebionetworks.bridge.rest.model.SignUp;
 import org.sagebionetworks.bridge.rest.model.Study;
 import org.sagebionetworks.bridge.rest.model.StudyParticipant;
-import org.sagebionetworks.bridge.rest.model.Substudy;
 import org.sagebionetworks.bridge.rest.model.UploadFieldDefinition;
 import org.sagebionetworks.bridge.rest.model.UploadFieldType;
 import org.sagebionetworks.bridge.rest.model.UploadSchema;
@@ -94,7 +94,7 @@ public class ExportTest {
 
     private static final String CONFIG_KEY_RECORD_ID_OVERRIDE_BUCKET = "record.id.override.bucket";
     private static final ObjectMapper JSON_OBJECT_MAPPER = new ObjectMapper();
-    private static final String TEST_STUDY_ID = "api";
+    private static final String TEST_APP_ID = "api";
 
     private static final String APP_VERSION = "version 1.0.2, build 2";
     private static final String CREATED_ON_STR = "2015-04-02T03:27:09-07:00";
@@ -161,7 +161,7 @@ public class ExportTest {
     private static TestUserHelper.TestUser user;
 
     private static String dataGroup;
-    private static String substudyId;
+    private static String studyId;
     
     // per-test values
     private String recordId;
@@ -217,37 +217,39 @@ public class ExportTest {
         admin = TestUserHelper.getSignedInAdmin();
         developer = TestUserHelper.createAndSignInUser(ExportTest.class, false, Role.DEVELOPER);
 
-        // Study
-        StudiesApi studiesApi = developer.getClient(StudiesApi.class);
-        Study study = studiesApi.getUsersStudy().execute().body();
-        if (study.getDataGroups().isEmpty()) {
+        // App
+        AppsApi appsApi = developer.getClient(AppsApi.class);
+        App app = appsApi.getUsersApp().execute().body();
+        if (app.getDataGroups().isEmpty()) {
             dataGroup = "group1";
-            study.setDataGroups(ImmutableList.of(dataGroup));
-            VersionHolder version = studiesApi.updateUsersStudy(study).execute().body();
-            study.setVersion(version.getVersion());
+            app.setDataGroups(ImmutableList.of(dataGroup));
+            VersionHolder version = appsApi.updateUsersApp(app).execute().body();
+            app.setVersion(version.getVersion());
         } else {
-            dataGroup = study.getDataGroups().get(0);            
+            dataGroup = app.getDataGroups().get(0);
         }
         
-        // Substudy
-        SubstudiesApi substudiesApi = admin.getClient(SubstudiesApi.class);
+        // Study
+        StudiesApi studiesApi = admin.getClient(StudiesApi.class);
         
         // This should sign in the admin...
-        List<Substudy> substudies = substudiesApi.getSubstudies(false).execute().body().getItems();
-        if (substudies.isEmpty()) {
-            substudyId = "substudyA";
-            Substudy substudy = new Substudy().id(substudyId).name("Substudy " + substudyId);
-            substudiesApi.createSubstudy(substudy).execute();
+        List<Study> studies = studiesApi.getStudies(null, null, false).execute().body().getItems();
+        if (studies.isEmpty()) {
+            studyId = "studyA";
+            Study study = new Study().identifier(studyId).name("Study " + studyId);
+            studiesApi.createStudy(study).execute();
         } else {
-            substudyId = substudies.get(0).getId();    
+            studyId = studies.get(0).getIdentifier();
         }
 
         String userEmail = IntegTestUtils.makeEmail(ExportTest.class);
-        SignUp signUp = new SignUp().email(userEmail).password("P@ssword`1").study(TEST_STUDY_ID);
+        SignUp signUp = new SignUp().email(userEmail).password("P@ssword`1").appId(TEST_APP_ID);
         signUp.dataGroups(ImmutableList.of(dataGroup));
-        signUp.substudyIds(ImmutableList.of(substudyId));
+        // For backwards compatibility, we need to create an enrollment with our study ID but not an external ID.
+        Map<String, String> externalIdMap = new HashMap<>();
+        externalIdMap.put(studyId, null);
         user = new TestUserHelper.Builder(ExportTest.class).withSignUp(signUp).withConsentUser(true)
-                .createAndSignInUser();
+                .withExternalIds(externalIdMap).createAndSignInUser();
 
         // Initialize user by asking for activities. This sets the activities_retrieved event, so we can calculate
         // dayInStudy.
@@ -260,7 +262,7 @@ public class ExportTest {
         synapseClient.setApiKey(synapseApiKey);
 
         // ensure we have a metadata field in the study
-        List<UploadFieldDefinition> metadataFieldDefList = study.getUploadMetadataFieldDefinitions();
+        List<UploadFieldDefinition> metadataFieldDefList = app.getUploadMetadataFieldDefinitions();
 
         // Find the metadata field.
         boolean foundMetadataField = false;
@@ -275,8 +277,8 @@ public class ExportTest {
             // No metadata field. Create it.
             UploadFieldDefinition metadataField = new UploadFieldDefinition().name(METADATA_FIELD_NAME)
                     .type(UploadFieldType.STRING).maxLength(METADATA_FIELD_LENGTH);
-            study.addUploadMetadataFieldDefinitionsItem(metadataField);
-            studiesApi.updateUsersStudy(study).execute();
+            app.addUploadMetadataFieldDefinitionsItem(metadataField);
+            appsApi.updateUsersApp(app).execute();
         }
 
         // ensure schemas exist, so we have something to upload against
@@ -411,7 +413,7 @@ public class ExportTest {
         LOG.info("Starting useLastExportTime() for record " + recordId);
 
         // set exportTime to 15 min ago
-        ddbExportTimeTable.updateItem("studyId", TEST_STUDY_ID, new AttributeUpdate("lastExportDateTime").put(
+        ddbExportTimeTable.updateItem("studyId", TEST_APP_ID, new AttributeUpdate("lastExportDateTime").put(
                 startDateTime.getMillis()));
 
         // create request - endDateTime is 5 minutes ago
@@ -565,7 +567,7 @@ public class ExportTest {
 
         Callable<String> dataTableIdProvider = () -> {
             Item tableItem = ddbSynapseMetaTables.getItem("tableName",
-                    TEST_STUDY_ID + "-default");
+                    TEST_APP_ID + "-default");
             return tableItem.getString("tableId");
         };
         executeAndValidate(requestNode, 1, "Default Health Data Record Table",
@@ -574,7 +576,7 @@ public class ExportTest {
 
     private static Callable<String> getDataTableIdProviderForSchema(String schemaId, long schemaRev) {
         return () -> {
-            String expectedSchemaKey = TEST_STUDY_ID + "-" + schemaId + "-v" + schemaRev;
+            String expectedSchemaKey = TEST_APP_ID + "-" + schemaId + "-v" + schemaRev;
             Item tableItem = ddbSynapseTables.getItem("schemaKey", expectedSchemaKey);
             return tableItem.getString("tableId");
         };
@@ -585,7 +587,7 @@ public class ExportTest {
             Map<String, String> expectedHealthDataMap) throws Exception {
         // enforce study whitelist, to make sure we don't export outside of the API study
         ArrayNode studyWhitelistArray = JSON_OBJECT_MAPPER.createArrayNode();
-        studyWhitelistArray.add(TEST_STUDY_ID);
+        studyWhitelistArray.add(TEST_APP_ID);
         requestNode.set("studyWhitelist", studyWhitelistArray);
 
         LOG.info("Time before request exporting: " + DateTime.now().toString());
@@ -614,7 +616,7 @@ public class ExportTest {
         Long lastExportDateTimeEpoch = null;
 
         for (int i = 0; i < EXPORT_RETRIES; i++) {
-            lastExportDateTime = ddbExportTimeTable.getItem("studyId", TEST_STUDY_ID);
+            lastExportDateTime = ddbExportTimeTable.getItem("studyId", TEST_APP_ID);
             if (lastExportDateTime != null) {
                 lastExportDateTimeEpoch = lastExportDateTime.getLong("lastExportDateTime");
                 if (endDateTimeEpoch == lastExportDateTimeEpoch) {
@@ -636,7 +638,7 @@ public class ExportTest {
         // Kick off synapse queries in table, so we can minimize idle wait.
 
         // query appVersion table
-        Item appVersionItem = ddbSynapseMetaTables.getItem("tableName", TEST_STUDY_ID + "-appVersion");
+        Item appVersionItem = ddbSynapseMetaTables.getItem("tableName", TEST_APP_ID + "-appVersion");
         final String appVersionTableId = appVersionItem.getString("tableId");
         assertFalse(StringUtils.isBlank(appVersionTableId));
         Future<RowSet> appVersionFuture = executorService.submit(() -> querySynapseTable(appVersionTableId, recordId,
@@ -770,7 +772,7 @@ public class ExportTest {
                 break;
             }
             case "substudyMemberships": {
-                assertEquals(columnValue, String.format("|%s=|", substudyId));
+                assertEquals(columnValue, String.format("|%s=|", studyId));
                 break;
             }
             case "createdOn": {
