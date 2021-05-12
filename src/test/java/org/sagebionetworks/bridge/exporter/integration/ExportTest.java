@@ -113,6 +113,7 @@ public class ExportTest {
     private static final String METADATA_SYNAPSE_COLUMN_NAME = "metadata." + METADATA_FIELD_NAME;
     private static final String PHONE_INFO = "BridgeEXIntegTest";
     private static final String RAW_DATA_COLUMN_NAME = "rawData";
+    private static final String RAW_METADATA_COLUMN_NAME = "rawMetadata";
     private static final String SCHEMA_ID = "legacy-survey+with-special-chars";
     private static final long SCHEMA_REV = 1;
     private static final String SCHEMA_TABLE_NAME = SCHEMA_ID + "-v" + SCHEMA_REV;
@@ -151,6 +152,7 @@ public class ExportTest {
     // misc
     private static ExecutorService executorService;
     private static File tmpDir;
+    private static Map<String, Object> metadataMap;
     private static String integTestRunId;
     private static Table ddbExportTimeTable;
     private static Table ddbSynapseMetaTables;
@@ -352,6 +354,9 @@ public class ExportTest {
         // Generate a test run ID
         integTestRunId = RandomStringUtils.randomAlphabetic(METADATA_FIELD_LENGTH);
         LOG.info("integTestRunId=" + integTestRunId);
+
+        metadataMap = new HashMap<>();
+        metadataMap.put(METADATA_FIELD_NAME, integTestRunId);
     }
 
     @BeforeMethod
@@ -392,9 +397,6 @@ public class ExportTest {
 
     private void setupLegacySurveyTest() throws Exception {
         // Submit health data - Note that we build maps, since Jackson and GSON don't mix very well.
-        Map<String, String> metadataMap = new HashMap<>();
-        metadataMap.put(METADATA_FIELD_NAME, integTestRunId);
-
         HealthDataSubmission submission = new HealthDataSubmission().appVersion(APP_VERSION).createdOn(CREATED_ON)
                 .phoneInfo(PHONE_INFO).schemaId(SCHEMA_ID).schemaRevision(SCHEMA_REV).metadata(metadataMap)
                 .data(LEGACY_SURVEY_DATA_MAP);
@@ -495,9 +497,6 @@ public class ExportTest {
         Map<String, Object> dataMap = new HashMap<>();
         dataMap.put("my-large-text-attachment", "This is my large text attachment");
 
-        Map<String, String> metadataMap = new HashMap<>();
-        metadataMap.put(METADATA_FIELD_NAME, integTestRunId);
-
         HealthDataSubmission submission = new HealthDataSubmission().appVersion(APP_VERSION).createdOn(CREATED_ON)
                 .phoneInfo(PHONE_INFO).schemaId(LARGE_TEXT_ATTACHMENT_SCHEMA_ID)
                 .schemaRevision(LARGE_TEXT_ATTACHMENT_SCHEMA_REV).metadata(metadataMap).data(dataMap);
@@ -536,9 +535,6 @@ public class ExportTest {
         // Submit health data - Note that we build maps, since Jackson and GSON don't mix very well.
         Map<String, Object> dataMap = new HashMap<>();
         dataMap.put("dummy-key", "dummy-value");
-
-        Map<String, String> metadataMap = new HashMap<>();
-        metadataMap.put(METADATA_FIELD_NAME, integTestRunId);
 
         // Null out schema ID and rev to ensure schemaless health data.
         HealthDataSubmission submission = new HealthDataSubmission().appVersion(APP_VERSION).createdOn(CREATED_ON)
@@ -692,20 +688,9 @@ public class ExportTest {
             } else if (expectedHealthDataMap.containsKey(headerName)) {
                 assertEquals(columnValue, expectedHealthDataMap.get(headerName));
             } else if (headerName.equals(RAW_DATA_COLUMN_NAME)) {
-                // We need to use a file handle association to ensure we have permissions to get the file handle.
-                FileHandleAssociation fileHandleAssociation = new FileHandleAssociation();
-                fileHandleAssociation.setAssociateObjectId(healthDataTableId);
-                fileHandleAssociation.setAssociateObjectType(FileHandleAssociateType.TableEntity);
-                fileHandleAssociation.setFileHandleId(columnValue);
-
-                String rawDataFilename = recordId + "-" + RandomStringUtils.randomAlphabetic(4) + "-raw.json";
-                File rawDataFile = new File(tmpDir, rawDataFilename);
-
-                synapseClient.downloadFile(fileHandleAssociation, rawDataFile);
-
-                Map<String, Object> rawDataMap = DefaultObjectMapper.INSTANCE.readValue(rawDataFile,
-                        DefaultObjectMapper.TYPE_REF_RAW_MAP);
-                assertEquals(rawDataMap, submittedHealthDataMap);
+                assertFileHandle(healthDataTableId, columnValue, submittedHealthDataMap);
+            } else if (headerName.equals(RAW_METADATA_COLUMN_NAME)) {
+                assertFileHandle(healthDataTableId, columnValue, metadataMap);
             } else {
                 commonColumnsVerification(headerName, columnValue, recordId, uploadRecord);
             }
@@ -714,6 +699,24 @@ public class ExportTest {
         assertTrue(healthDataColumnNameSet.containsAll(expectedHealthDataMap.keySet()));
         assertTrue(healthDataColumnNameSet.contains(METADATA_SYNAPSE_COLUMN_NAME));
         assertTrue(healthDataColumnNameSet.contains(RAW_DATA_COLUMN_NAME));
+    }
+
+    private void assertFileHandle(String synapseTableId, String fileHandleId, Map<String, Object> expectedMap)
+            throws Exception {
+        // We need to use a file handle association to ensure we have permissions to get the file handle.
+        FileHandleAssociation fileHandleAssociation = new FileHandleAssociation();
+        fileHandleAssociation.setAssociateObjectId(synapseTableId);
+        fileHandleAssociation.setAssociateObjectType(FileHandleAssociateType.TableEntity);
+        fileHandleAssociation.setFileHandleId(fileHandleId);
+
+        String filename = recordId + "-" + RandomStringUtils.randomAlphabetic(4) + "-raw.json";
+        File file = new File(tmpDir, filename);
+
+        synapseClient.downloadFile(fileHandleAssociation, file);
+
+        Map<String, Object> actualMap = DefaultObjectMapper.INSTANCE.readValue(file,
+                DefaultObjectMapper.TYPE_REF_RAW_MAP);
+        assertEquals(actualMap, expectedMap);
     }
 
     private RowSet querySynapseTable(String tableId, String expectedRecordId, int expectedCount) throws Exception {
@@ -772,7 +775,7 @@ public class ExportTest {
                 break;
             }
             case "substudyMemberships": {
-                assertEquals(columnValue, String.format("|%s=|", studyId));
+                assertTrue(columnValue.contains("|" + studyId + "=|"));
                 break;
             }
             case "createdOn": {
