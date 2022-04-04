@@ -81,6 +81,7 @@ import org.sagebionetworks.bridge.rest.model.UploadSchemaType;
 import org.sagebionetworks.bridge.rest.model.VersionHolder;
 import org.sagebionetworks.bridge.s3.S3Helper;
 import org.sagebionetworks.bridge.sqs.SqsHelper;
+import org.sagebionetworks.bridge.user.TestUser;
 import org.sagebionetworks.bridge.user.TestUserHelper;
 import org.sagebionetworks.bridge.util.IntegTestUtils;
 
@@ -132,7 +133,7 @@ public class ExportTest {
     private static final int SYNAPSE_RETRIES = 9;
 
     private static final String USER_NAME = "synapse.user";
-    private static final String SYNAPSE_API_KEY_NAME = "synapse.api.key";
+    private static final String SYNAPSE_ACCESS_TOKEN_NAME = "synapse.access.token";
 
     // services
     private static AmazonS3Client s3Client;
@@ -158,9 +159,9 @@ public class ExportTest {
     private static Table ddbSynapseMetaTables;
     private static Table ddbSynapseTables;
     private static Table ddbRecordTable;
-    private static TestUserHelper.TestUser admin;
-    private static TestUserHelper.TestUser developer;
-    private static TestUserHelper.TestUser user;
+    private static TestUser admin;
+    private static TestUser developer;
+    private static TestUser user;
 
     private static String dataGroup;
     private static String studyId;
@@ -191,7 +192,7 @@ public class ExportTest {
         exporterSqsUrl = bridgeConfig.get("exporter.request.sqs.queue.url");
         recordIdOverrideBucket = bridgeConfig.get(CONFIG_KEY_RECORD_ID_OVERRIDE_BUCKET);
         String synapseUser = bridgeConfig.get(USER_NAME);
-        String synapseApiKey = bridgeConfig.get(SYNAPSE_API_KEY_NAME);
+        String synapseAccessToken = bridgeConfig.get(SYNAPSE_ACCESS_TOKEN_NAME);
 
         // AWS services
         BasicAWSCredentials awsCredentials = new BasicAWSCredentials(bridgeConfig.get("aws.key"),
@@ -261,7 +262,7 @@ public class ExportTest {
         // Synapse clients
         synapseClient = new SynapseClientImpl();
         synapseClient.setUsername(synapseUser);
-        synapseClient.setApiKey(synapseApiKey);
+        synapseClient.setBearerAuthorizationToken(synapseAccessToken);
 
         // ensure we have a metadata field in the study
         List<UploadFieldDefinition> metadataFieldDefList = app.getUploadMetadataFieldDefinitions();
