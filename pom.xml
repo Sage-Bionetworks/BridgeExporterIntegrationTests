@@ -85,12 +85,12 @@
         <dependency>
             <groupId>org.sagebionetworks</groupId>
             <artifactId>BridgeIntegTestUtils</artifactId>
-            <version>1.2.3</version>
+            <version>1.2.12</version>
         </dependency>
         <dependency>
             <groupId>org.sagebionetworks.bridge</groupId>
             <artifactId>rest-client</artifactId>
-            <version>0.21.30</version>
+            <version>0.24.7</version>
             <scope>test</scope>
         </dependency>
         <dependency>
